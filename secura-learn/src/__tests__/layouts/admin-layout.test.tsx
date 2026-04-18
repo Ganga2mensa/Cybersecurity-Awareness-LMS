@@ -14,6 +14,10 @@ vi.mock('next/link', () => ({
   ),
 }))
 
+vi.mock('@clerk/nextjs', () => ({
+  SignOutButton: ({ children }: any) => <>{children}</>,
+}))
+
 describe('Admin SidebarNav (Req 9.3)', () => {
   it('sidebar contains a link for "Courses" (Req 9.3)', () => {
     render(<SidebarNav />)

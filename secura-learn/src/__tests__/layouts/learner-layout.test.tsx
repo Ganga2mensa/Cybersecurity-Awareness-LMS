@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { TopNav } from '@/components/shared/TopNav'
 
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/learn/dashboard',
+  usePathname: () => '/learner/dashboard',
 }))
 
 vi.mock('next/link', () => ({
@@ -12,6 +12,10 @@ vi.mock('next/link', () => ({
       {children}
     </a>
   ),
+}))
+
+vi.mock('@clerk/nextjs', () => ({
+  SignOutButton: ({ children }: any) => <>{children}</>,
 }))
 
 describe('Learner TopNav (Req 10.3)', () => {

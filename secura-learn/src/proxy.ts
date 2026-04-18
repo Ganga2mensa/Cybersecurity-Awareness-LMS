@@ -11,7 +11,7 @@ const isPublicRoute = createRouteMatcher([
 ])
 
 const isAdminRoute = createRouteMatcher(['/admin(.*)'])
-const isLearnerRoute = createRouteMatcher(['/learn(.*)'])
+const isLearnerRoute = createRouteMatcher(['/learner(.*)'])
 
 export default clerkMiddleware(async (auth, req) => {
   const { userId, orgId, orgRole } = await auth()
@@ -21,12 +21,12 @@ export default clerkMiddleware(async (auth, req) => {
     // Redirect authenticated users away from auth pages
     if (userId && (req.nextUrl.pathname === '/sign-in' || req.nextUrl.pathname === '/sign-up')) {
       const role = orgRole
-      const dest = role === 'org:admin' ? '/admin/dashboard' : '/learn/dashboard'
+      const dest = role === 'org:admin' ? '/admin/dashboard' : '/learner/dashboard'
       return NextResponse.redirect(new URL(dest, req.url))
     }
     // Redirect authenticated users from landing page to their dashboard
     if (userId && req.nextUrl.pathname === '/') {
-      const dest = orgRole === 'org:admin' ? '/admin/dashboard' : '/learn/dashboard'
+      const dest = orgRole === 'org:admin' ? '/admin/dashboard' : '/learner/dashboard'
       return NextResponse.redirect(new URL(dest, req.url))
     }
     return NextResponse.next()

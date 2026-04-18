@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
 
 const navLinks = [
-  { label: "My Courses", href: "/learn/courses" },
-  { label: "Badges", href: "/learn/badges" },
-  { label: "Progress", href: "/learn/progress" },
+  { label: "My Courses", href: "/learner/courses" },
+  { label: "Badges", href: "/learner/badges" },
+  { label: "Progress", href: "/learner/progress" },
 ]
 
 export function TopNav() {

@@ -38,8 +38,8 @@ vi.mock('@clerk/nextjs/server', () => ({
   },
 }))
 
-// Import middleware AFTER mock setup so capturedHandlerRef.current is populated
-import '@/middleware'
+// Import proxy AFTER mock setup so capturedHandlerRef.current is populated
+import '@/proxy
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,15 +91,15 @@ describe('middleware — unit tests', () => {
     expect(response.headers.get('location')).toContain('/admin/dashboard')
   })
 
-  // Req 5.6 — authenticated learner on `/` → redirects to /learn/dashboard
-  it('redirects authenticated learner from / to /learn/dashboard', async () => {
+  // Req 5.6 — authenticated learner on `/` → redirects to /learner/dashboard
+  it('redirects authenticated learner from / to /learner/dashboard', async () => {
     const response = await runMiddleware('/', {
       userId: 'user_learner',
       orgId: 'org_1',
       orgRole: 'org:learner',
     })
     expect(response.status).toBe(307)
-    expect(response.headers.get('location')).toContain('/learn/dashboard')
+    expect(response.headers.get('location')).toContain('/learner/dashboard')
   })
 
   // Req 3.3 — authenticated admin on /sign-in → redirects to /admin/dashboard
@@ -113,15 +113,15 @@ describe('middleware — unit tests', () => {
     expect(response.headers.get('location')).toContain('/admin/dashboard')
   })
 
-  // Req 3.3 — authenticated learner on /sign-in → redirects to /learn/dashboard
-  it('redirects authenticated learner from /sign-in to /learn/dashboard', async () => {
+  // Req 3.3 — authenticated learner on /sign-in → redirects to /learner/dashboard
+  it('redirects authenticated learner from /sign-in to /learner/dashboard', async () => {
     const response = await runMiddleware('/sign-in', {
       userId: 'user_learner',
       orgId: 'org_1',
       orgRole: 'org:learner',
     })
     expect(response.status).toBe(307)
-    expect(response.headers.get('location')).toContain('/learn/dashboard')
+    expect(response.headers.get('location')).toContain('/learner/dashboard')
   })
 
   // Req 3.3 — authenticated admin on /sign-up → redirects to role dashboard
@@ -161,12 +161,12 @@ describe('middleware — Property 1: unauthenticated redirect to sign-in', () =>
     )
   })
 
-  it('redirects unauthenticated requests on /learn/* to /sign-in', async () => {
+  it('redirects unauthenticated requests on /learner/* to /sign-in', async () => {
     // Feature: secura-learn-platform, Property 1: Unauthenticated requests to protected routes are redirected to sign-in
     await fc.assert(
       fc.asyncProperty(
         fc.string({ minLength: 0, maxLength: 50 }).map((s) =>
-          '/learn/' + s.replace(/[^a-zA-Z0-9\-_/]/g, 'x')
+          '/learner/' + s.replace(/[^a-zA-Z0-9\-_/]/g, 'x')
         ),
         async (path) => {
           const response = await runMiddleware(path, { userId: null, orgId: null, orgRole: null })
@@ -209,12 +209,12 @@ describe('middleware — Property 2: authenticated user without org is redirecte
     )
   })
 
-  it('redirects authenticated user with no orgId away from /learn/* routes', async () => {
+  it('redirects authenticated user with no orgId away from /learner/* routes', async () => {
     // Feature: secura-learn-platform, Property 2: Authenticated users without an active organization are redirected from protected routes
     await fc.assert(
       fc.asyncProperty(
         fc.string({ minLength: 0, maxLength: 50 }).map((s) =>
-          '/learn/' + s.replace(/[^a-zA-Z0-9\-_/]/g, 'x')
+          '/learner/' + s.replace(/[^a-zA-Z0-9\-_/]/g, 'x')
         ),
         async (path) => {
           const response = await runMiddleware(path, {
@@ -223,7 +223,7 @@ describe('middleware — Property 2: authenticated user without org is redirecte
             orgRole: null,
           })
           expect(response.status).toBe(307)
-          expect(response.headers.get('location')).not.toContain('/learn/')
+          expect(response.headers.get('location')).not.toContain('/learner/')
         }
       ),
       { numRuns: 100 }
@@ -260,12 +260,12 @@ describe('middleware — Property 3: role mismatch redirects to /unauthorized', 
     )
   })
 
-  it('redirects admin role on /learn/* to /unauthorized', async () => {
+  it('redirects admin role on /learner/* to /unauthorized', async () => {
     // Feature: secura-learn-platform, Property 3: Role mismatch on any protected route redirects to /unauthorized
     await fc.assert(
       fc.asyncProperty(
         fc.string({ minLength: 0, maxLength: 50 }).map((s) =>
-          '/learn/' + s.replace(/[^a-zA-Z0-9\-_/]/g, 'x')
+          '/learner/' + s.replace(/[^a-zA-Z0-9\-_/]/g, 'x')
         ),
         async (path) => {
           const response = await runMiddleware(path, {
