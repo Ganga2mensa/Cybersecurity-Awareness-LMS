@@ -1,4 +1,5 @@
 import { TopNav } from "@/components/shared/TopNav"
+import { ThemeToggle } from "@/components/shared/ThemeToggle"
 
 export default function LearnerLayout({
   children,
@@ -6,22 +7,20 @@ export default function LearnerLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex min-h-screen flex-col">
-      {/* Top navigation bar */}
-      <header className="border-b border-border bg-background">
-        <div className="flex items-center justify-between px-6 py-3">
-          {/* Brand */}
-          <div className="text-xl font-bold text-foreground tracking-tight">
+    <div className="flex min-h-screen flex-col bg-background">
+      <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
+        <div className="flex items-center justify-between px-6 py-3 max-w-7xl mx-auto">
+          <span className="text-xl font-bold text-foreground tracking-tight">
             SecuraLearn
+          </span>
+          <div className="flex items-center gap-2">
+            <TopNav />
+            <ThemeToggle />
           </div>
-
-          {/* Navigation links */}
-          <TopNav />
         </div>
       </header>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-auto p-8">
+      <main className="flex-1 overflow-auto p-8 bg-background text-foreground">
         {children}
       </main>
     </div>

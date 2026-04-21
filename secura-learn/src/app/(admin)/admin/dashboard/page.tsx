@@ -1,16 +1,17 @@
 import { auth, currentUser, clerkClient } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import { UserGreeting } from "@/components/shared/UserGreeting"
+import { syncUserToDatabase } from "@/actions/user"
 
 export default async function AdminDashboardPage() {
-  const { userId, orgId } = await auth()
+  await syncUserToDatabase()
 
-  // Redirect if no active organization
+  const { orgId } = await auth()
+
   if (!orgId) {
     redirect("/sign-in")
   }
 
-  // Fetch user name and org name in parallel
   const [user, client] = await Promise.all([
     currentUser(),
     clerkClient(),
@@ -29,9 +30,16 @@ export default async function AdminDashboardPage() {
   }
 
   return (
-    <div>
+    <div className="max-w-4xl mx-auto">
       <UserGreeting userName={userName} orgName={orgName} />
-      <p className="text-muted-foreground">Phase 2 content coming soon</p>
+
+      {/* Placeholder card */}
+      <div className="mt-6 rounded-xl border border-border bg-card p-6">
+        <h2 className="text-lg font-semibold text-foreground mb-1">Dashboard</h2>
+        <p className="text-muted-foreground text-sm">
+          Phase 2 content coming soon — courses, users, and campaign management will appear here.
+        </p>
+      </div>
     </div>
   )
 }

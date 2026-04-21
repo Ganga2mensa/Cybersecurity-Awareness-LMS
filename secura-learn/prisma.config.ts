@@ -1,13 +1,17 @@
-import "dotenv/config";
-import { defineConfig } from "prisma/config";
+import { defineConfig } from 'prisma/config'
+import { config } from 'dotenv'
+import path from 'path'
+
+// Load .env.local explicitly before Prisma reads the datasource URL
+config({ path: path.resolve(process.cwd(), '.env.local'), override: true })
 
 export default defineConfig({
-  schema: "prisma/schema.prisma",
+  schema: 'prisma/schema.prisma',
   migrations: {
-    path: "prisma/migrations",
-    seed: "ts-node prisma/seed.ts",
+    path: 'prisma/migrations',
+    seed: 'ts-node prisma/seed.ts',
   },
   datasource: {
-    url: process.env.DATABASE_URL ?? "postgresql://placeholder:placeholder@localhost:5432/placeholder",
+    url: process.env.DATABASE_URL!,
   },
-});
+})

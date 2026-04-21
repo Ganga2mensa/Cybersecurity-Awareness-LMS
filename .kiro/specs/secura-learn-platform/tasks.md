@@ -306,3 +306,556 @@ All code is TypeScript (strict mode). Testing uses Vitest + fast-check.
 - The middleware (task 5) must be complete before auth pages and dashboards are built, as it defines the routing contract
 - Admin and learner dashboard pages (tasks 10.2, 11.2) must remain Server Components — no `"use client"` directive
 - The `forbidden()` pattern (task 12.2–12.3) is the idiomatic Next.js 15 approach for HTTP 403 responses
+
+---
+
+## Phase 2 Tasks
+
+### Overview
+
+Phase 2 bridges Clerk identity with the Prisma database and adds user profile pages. Tasks build on the completed Phase 1 foundation. All Phase 1 tests must continue to pass throughout Phase 2 development.
+
+---
+
+- [x] 19. Install svix and configure webhook secret
+  - Install the `svix` package: `npm install svix`
+  - Add `CLERK_WEBHOOK_SECRET` to `.env.example` with a `"whsec_..."` placeholder and an inline comment: `# Webhook signing secret — obtain from Clerk Dashboard > Webhooks > your endpoint`
+  - _Requirements: 12.1, 12.6_
+
+- [x] 20. Implement Clerk webhook handler
+  - [x] 20.1 Create `src/app/api/webhooks/clerk/route.ts`
+    - Export a `POST` handler that reads the raw request body and the `svix-id`, `svix-timestamp`, and `svix-signature` headers
+    - Verify the Svix signature using `new Webhook(CLERK_WEBHOOK_SECRET).verify(payload, headers)` — return 400 if verification fails
+    - Handle `user.created`: upsert a `User` record in Prisma with `clerkId`, `email` (primary email address), and `name` (first + last name)
+    - Handle `organization.created`: upsert an `Organization` record in Prisma with `clerkOrgId` and `name`
+    - Handle `organizationMembership.created`: look up the `Organization` by `clerkOrgId`, then update the `User` record to set `organizationId` and `role` (`org:admin` → `ADMIN`, `org:learner` → `LEARNER`)
+    - Return 200 on success, 400 on signature failure, 500 on DB error
+    - _Requirements: 12.1, 12.2, 12.3, 12.4_
+
+  - [x] 20.2 Register webhook endpoint in Clerk Dashboard
+    - Document the steps to register `https://{domain}/api/webhooks/clerk` in Clerk Dashboard under **Webhooks → Add Endpoint**
+    - List required events: `user.created`, `organization.created`, `organizationMembership.created`
+    - Note: for local development, use a tunnel (e.g., `ngrok http 3000`) to expose the local server
+    - _Requirements: 12.1_
+
+- [x] 21. Implement syncUserToDatabase Server Action
+  - Update `src/actions/user.ts` with a real implementation (replacing the Phase 1 TODO placeholder)
+  - Call `auth()` from `@clerk/nextjs/server` to get `userId`, `orgId`, and `orgRole`
+  - Call `currentUser()` to get the user's email address and full name
+  - Upsert the `Organization` record in Prisma if `orgId` is present (create with `clerkOrgId`, update is a no-op)
+  - Upsert the `User` record in Prisma with `clerkId`, `email`, `name`, `role`, and `organizationId`
+  - Also add `updateDisplayName(name: string)` Server Action that updates the `User.name` field for the current authenticated user
+  - Call `syncUserToDatabase()` at the top of both `/admin/dashboard/page.tsx` and `/learner/dashboard/page.tsx`
+  - _Requirements: 12.5_
+
+- [x] 22. Build user profile pages
+  - [x] 22.1 Create `src/app/(admin)/admin/profile/page.tsx`
+    - Server Component — call `auth()` to get `userId`, then fetch the user from Prisma with `prisma.user.findUnique({ where: { clerkId: userId }, include: { organization: true } })`
+    - Display: full name, email address, organization name, and a role badge (`ADMIN` or `LEARNER`)
+    - Include `<EditNameForm currentName={user.name} />` (Client Component) that calls the `updateDisplayName` Server Action on submit
+    - _Requirements: 13.1, 13.3, 13.4_
+
+  - [x] 22.2 Create `src/app/(learner)/learner/profile/page.tsx`
+    - Same structure as the admin profile page
+    - _Requirements: 13.2, 13.3, 13.4_
+
+  - [x] 22.3 Create `src/components/shared/EditNameForm.tsx`
+    - Client Component (`"use client"`)
+    - Accepts `currentName: string | null` prop
+    - Renders a controlled text input pre-filled with `currentName` and a "Save" submit button
+    - Uses `useTransition` to call `updateDisplayName(newName)` without blocking the UI
+    - Shows a loading state while the transition is pending
+    - _Requirements: 13.4_
+
+  - [x] 22.4 Add "Profile" link to admin sidebar (`SidebarNav.tsx`)
+    - Add `{ label: 'Profile', href: '/admin/profile' }` to the `navLinks` array
+    - _Requirements: 13.5_
+
+  - [x] 22.5 Add "Profile" link to learner top nav (`TopNav.tsx`)
+    - Add `{ label: 'Profile', href: '/learner/profile' }` to the `navLinks` array
+    - _Requirements: 13.6_
+
+- [x] 23. Write Phase 2 tests
+  - [x] 23.1 Write unit tests for webhook handler in `src/__tests__/api/webhook-clerk.test.ts`
+    - Test: valid Svix signature + `user.created` event → `prisma.user.upsert` called with correct `clerkId` and `email`, handler returns 200 (mock Prisma and Svix `Webhook.verify`)
+    - Test: invalid Svix signature → `Webhook.verify` throws → handler returns 400
+    - Test: valid `organization.created` event → `prisma.organization.upsert` called with correct `clerkOrgId`, handler returns 200
+    - Test: valid `organizationMembership.created` event → `prisma.user.update` called with correct `role`, handler returns 200
+    - Test: Prisma throws on `user.created` → handler returns 500
+    - _Requirements: 12.1, 12.2, 12.3, 12.4_
+
+  - [x] 23.2 Write unit tests for profile pages in `src/__tests__/pages/profile.test.tsx`
+    - Test: admin profile page renders user name and email (mock `auth()` and `prisma.user.findUnique`)
+    - Test: learner profile page renders user name and email
+    - Test: `EditNameForm` renders the current name in the input field
+    - _Requirements: 13.1, 13.2, 13.3_
+
+  - [x] 23.3 Write property test for Property 7 — webhook creates user record
+    - Tag: `// Feature: secura-learn-platform, Property 7: Webhook creates user record for any valid user.created event`
+    - Use `fc.record({ id: fc.string({ minLength: 1 }), email: fc.emailAddress(), firstName: fc.string(), lastName: fc.string() })` to generate arbitrary user data
+    - Mock Svix `Webhook.verify` to return a `user.created` event with the generated data; mock Prisma
+    - Assert that `prisma.user.upsert` is called with `clerkId` equal to the generated `id` and `email` equal to the generated email
+    - Run minimum 100 iterations
+    - _Requirements: 12.2_
+
+  - [x] 23.4 Write property test for Property 8 — profile page renders user data
+    - Tag: `// Feature: secura-learn-platform, Property 8: Profile page renders user name and email for any valid user record`
+    - Use `fc.record({ name: fc.string({ minLength: 1 }), email: fc.emailAddress() })` to generate arbitrary user data
+    - Mock `prisma.user.findUnique` to return a user record with the generated `name` and `email`
+    - Render the profile page and assert both the name and email appear in the rendered output
+    - Run minimum 100 iterations
+    - _Requirements: 13.3_
+
+- [x] 24. Final Phase 2 checkpoint
+  - Run `npm test` and confirm all tests pass (Phase 1 tests P1–P6 + Phase 2 tests P7–P8 + all unit tests)
+  - Run `npm run build` and confirm it exits with code 0
+  - Verify the webhook handler is reachable at `/api/webhooks/clerk` (returns 400 for a request with missing Svix headers, not 404)
+  - Verify the admin profile page renders correctly at `/admin/profile` for an authenticated admin user
+  - Verify the learner profile page renders correctly at `/learner/profile` for an authenticated learner user
+  - Verify the "Profile" link appears in the admin sidebar and the learner top nav
+  - _Requirements: 12.1–12.6, 13.1–13.6, 14.1–14.2_
+
+---
+
+## Phase 3 Tasks: Database Schema (Core Data Models)
+
+### Overview
+
+Phase 3 implements a complete, production-ready Prisma schema for the SecuraLearn Security Awareness LMS. The schema supports multi-tenancy using Clerk Organizations, proper relationships between all entities, performance indexes, and future Supabase Row Level Security (RLS) compatibility with TypeScript strict typing.
+
+---
+
+- [x] 25. Expand Prisma schema with core LMS models
+  - [x] 25.1 Update existing models and add new enums
+    - Update `Organization` model: add `slug` (unique), `logoUrl` (optional)
+    - Update `User` model: add `MANAGER` to `Role` enum, split `name` into `firstName` and `lastName` (both optional), add `avatarUrl` (optional), rename `clerkId` to `clerkUserId`
+    - Add `LessonType` enum with values: `VIDEO`, `TEXT`, `QUIZ`, `READING`, `SCORM`
+    - Add `CampaignStatus` enum with values: `DRAFT`, `SCHEDULED`, `RUNNING`, `COMPLETED`, `PAUSED`
+    - _Requirements: 15.1, 15.2, 17.1, 17.2, 17.3_
+
+  - [x] 25.2 Add Course and Module models
+    - Define `Course` model: `id` (cuid), `organizationId`, `title`, `description` (optional), `coverImageUrl` (optional), `isPublished` (boolean, default false), `createdById`, `createdAt`, `updatedAt`
+    - Define `Module` model: `id` (cuid), `courseId`, `title`, `description` (optional), `order` (int), `createdAt`, `updatedAt`
+    - Add proper relations: Course → Organization, Course → User (createdBy), Course → Module[], Module → Course
+    - _Requirements: 15.3, 15.4, 16.2, 16.3_
+
+  - [x] 25.3 Add Lesson and Quiz models
+    - Define `Lesson` model: `id` (cuid), `moduleId`, `title`, `type` (LessonType enum), `content` (optional text), `videoUrl` (optional), `durationMinutes` (optional int), `order` (int), `createdAt`, `updatedAt`
+    - Define `Quiz` model: `id` (cuid), `lessonId` (unique), `title`, `passingScore` (int, default 80), `createdAt`
+    - Define `QuizQuestion` model: `id` (cuid), `quizId`, `questionText`, `options` (Json), `order` (int)
+    - Add proper relations: Lesson → Module, Quiz → Lesson (one-to-one), QuizQuestion → Quiz
+    - _Requirements: 15.5, 15.6, 15.7, 16.4, 16.5, 16.6_
+
+  - [x] 25.4 Add Enrollment and Progress models
+    - Define `Enrollment` model: `id` (cuid), `userId`, `courseId`, `enrolledAt`, `completedAt` (optional), `progressPercentage` (int, default 0)
+    - Define `LessonProgress` model: `id` (cuid), `enrollmentId`, `lessonId`, `completed` (boolean, default false), `completedAt` (optional), `lastAccessedAt`
+    - Add proper relations: Enrollment → User, Enrollment → Course, LessonProgress → Enrollment, LessonProgress → Lesson
+    - _Requirements: 15.8, 15.9, 16.7, 16.8_
+
+  - [x] 25.5 Add PhishingCampaign and PhishingAttempt models
+    - Define `PhishingCampaign` model: `id` (cuid), `organizationId`, `title`, `description` (optional), `status` (CampaignStatus enum), `sentAt` (optional), `createdById`, `createdAt`
+    - Define `PhishingAttempt` model: `id` (cuid), `campaignId`, `userId`, `emailTemplateId` (optional), `clicked` (boolean, default false), `clickedAt` (optional), `reported` (boolean, default false), `reportedAt` (optional), `opened` (boolean, default false)
+    - Add proper relations: PhishingCampaign → Organization, PhishingCampaign → User (createdBy), PhishingAttempt → PhishingCampaign, PhishingAttempt → User
+    - _Requirements: 15.10, 15.11, 16.9, 16.10_
+
+- [x] 26. Add database constraints and indexes
+  - [x] 26.1 Add cascade delete constraints
+    - Set `onDelete: Cascade` for User → Organization, Module → Course, Lesson → Module, Quiz → Lesson, QuizQuestion → Quiz, LessonProgress → Enrollment, PhishingAttempt → PhishingCampaign
+    - Set `onDelete: Restrict` for Course → User (createdBy), PhishingCampaign → User (createdBy) to prevent deleting users who created content
+    - _Requirements: 16.1, 16.2, 16.3, 16.4, 16.5, 16.6, 16.7, 16.8, 16.9, 16.10_
+
+  - [x] 26.2 Add performance indexes
+    - Add `@@index([organizationId])` to all tenant-scoped models (User, Course, PhishingCampaign)
+    - Add `@@index([userId])` to Enrollment and PhishingAttempt
+    - Add `@@index([courseId])` to Module and Enrollment
+    - Add `@@index([moduleId])` to Lesson
+    - Add `@@index([lessonId])` to LessonProgress
+    - Add `@@index([campaignId])` to PhishingAttempt
+    - Add compound indexes: `@@index([userId, courseId])` on Enrollment, `@@index([enrollmentId, lessonId])` on LessonProgress
+    - Add timestamp indexes: `@@index([createdAt])`, `@@index([enrolledAt])`, `@@index([completedAt])` where relevant
+    - _Requirements: 18.1, 18.2, 18.3, 18.4_
+
+  - [x] 26.3 Add unique constraints and validation
+    - Add `@@unique([userId, courseId])` to Enrollment to prevent duplicate enrollments
+    - Add `@@unique([enrollmentId, lessonId])` to LessonProgress to prevent duplicate progress records
+    - Add `@@unique([campaignId, userId])` to PhishingAttempt to prevent duplicate attempts per user per campaign
+    - Ensure all `organizationId` fields are properly indexed for RLS compatibility
+    - _Requirements: 19.1, 19.2, 19.3, 19.4_
+
+- [x] 27. Generate and apply database migration
+  - [x] 27.1 Create initial migration
+    - Run `npx prisma migrate dev --name init` to generate the migration files
+    - Verify migration files are created in `prisma/migrations/` directory
+    - Ensure migration applies successfully to the development database
+    - _Requirements: 20.1_
+
+  - [x] 27.2 Generate Prisma client
+    - Run `npx prisma generate` to create TypeScript types for all models
+    - Verify generated types include all enums, models, and relations
+    - Confirm no TypeScript errors in the generated client
+    - _Requirements: 20.2_
+
+- [x] 28. Create comprehensive seed script
+  - [x] 28.1 Implement seed data creation
+    - Replace the placeholder `prisma/seed.ts` with comprehensive seed data
+    - Create 2 sample Organizations with realistic names and slugs
+    - Create 4 sample Users: 2 Admins (one per org), 2 Learners (one per org)
+    - Use realistic names, emails, and ensure proper organization assignments
+    - _Requirements: 20.3, 20.4_
+
+  - [x] 28.2 Create course content structure
+    - Create 3 sample Courses: "Phishing Basics", "Password Security", "Social Engineering"
+    - Each course should have 2-3 modules with descriptive titles
+    - Each module should have 3-4 lessons of different types (VIDEO, TEXT, READING)
+    - Add 1 quiz lesson per course with realistic quiz content
+    - Ensure proper ordering (order field) for modules and lessons
+    - _Requirements: 20.4_
+
+  - [x] 28.3 Create quiz questions and answers
+    - For each quiz, create 4 multiple-choice questions
+    - Store questions in QuizQuestion model with proper JSON structure for options
+    - Each option should have `text` and `isCorrect` boolean fields
+    - Ensure at least one correct answer per question
+    - _Requirements: 20.4_
+
+  - [x] 28.4 Create enrollment and progress data
+    - Create sample enrollments for learners in various courses
+    - Add realistic progress records showing different completion states
+    - Some lessons completed, some in progress, some not started
+    - Include realistic timestamps for enrollment and completion dates
+    - _Requirements: 20.4_
+
+  - [x] 28.5 Create phishing campaign data
+    - Create 2 sample PhishingCampaigns with different statuses (COMPLETED, RUNNING)
+    - Create 5 PhishingAttempt records showing various user interactions
+    - Include mix of clicked/not clicked, reported/not reported scenarios
+    - Ensure realistic timestamps and proper user/campaign associations
+    - _Requirements: 20.4_
+
+- [ ] 29. Run seed and verify data
+  - [ ] 29.1 Execute seed script
+    - Add `ts-node` as dev dependency if not already present
+    - Run `npx prisma db seed` to populate the database
+    - Verify seed script completes without errors
+    - _Requirements: 20.4_
+
+  - [ ] 29.2 Verify data in Prisma Studio
+    - Run `npx prisma studio` to open the database browser
+    - Verify all tables contain the expected seed data
+    - Check that relationships are properly established (foreign keys working)
+    - Confirm data integrity and realistic content
+    - _Requirements: 20.5_
+
+- [ ] 30. Test database integration with Next.js
+  - [ ] 30.1 Verify database connection
+    - Run `npm run dev` and ensure the application starts without database errors
+    - Verify Prisma client can connect and query the database
+    - Test that existing dashboard pages still work with the expanded schema
+    - _Requirements: 21.1, 21.2_
+
+  - [ ] 30.2 Test CRUD operations
+    - Create a simple test API route that performs basic CRUD operations on each model
+    - Test creating, reading, updating, and deleting records
+    - Verify referential integrity is maintained during operations
+    - Ensure cascade deletes work correctly
+    - _Requirements: 21.3, 21.4_
+
+  - [ ] 30.3 Verify TypeScript integration
+    - Confirm all Prisma-generated types are available in TypeScript
+    - Test that model relationships provide proper type safety
+    - Verify enum types are correctly typed and usable
+    - Ensure no TypeScript errors in existing code after schema changes
+    - _Requirements: 21.2_
+
+- [ ] 31. Final Phase 3 checkpoint
+  - Run `npm test` and confirm all existing tests still pass
+  - Run `npm run build` and confirm it exits with code 0
+  - Verify `npx prisma studio` shows all seeded data correctly
+  - Confirm the application runs successfully with `npm run dev`
+  - Verify all database models are properly typed and accessible
+  - Ensure all tests pass, ask the user if questions arise.
+
+## Notes
+
+- Phase 3 focuses exclusively on database schema and data layer implementation
+- All existing Phase 1 and Phase 2 functionality must continue to work
+- The schema is designed for future Supabase RLS compatibility with `organizationId` on all tenant-scoped models
+- Proper indexing ensures good performance as data volume grows
+- Comprehensive seed data provides realistic test scenarios for development
+- TypeScript strict typing ensures type safety across all database operations
+
+---
+
+## Phase 4 Tasks: Core LMS UI and Business Logic
+
+### Overview
+
+Phase 4 builds the full LMS experience on top of the Phase 3 schema. It covers five feature groups: Course Management (Admin), Learner Course Browsing & Enrollment, Lesson Viewer, Progress Tracking, and Phishing Campaign Management. All data operations are strictly scoped to the user's organization. Server Components handle data fetching; Server Actions handle all mutations; Client Components are used only where interactivity is required.
+
+---
+
+- [ ] 32. Create pure utility functions and their property-based tests
+  - [ ] 32.1 Implement `calculateProgressPercentage` in `src/lib/progress.ts`
+    - Export `calculateProgressPercentage(completedLessons: number, totalLessons: number): number`
+    - Return `Math.floor((completedLessons / totalLessons) * 100)`, guard `totalLessons === 0` → return 0
+    - _Requirements: 25.1, 25.7_
+
+  - [ ]* 32.2 Write property tests for `calculateProgressPercentage`
+    - **Property 9: Result is always in [0, 100] for any valid inputs**
+    - **Property 10: Returns 0 when completedLessons is 0**
+    - **Property 11: Returns 100 when completedLessons equals totalLessons**
+    - **Validates: Requirements 25.1, 25.7**
+
+  - [ ] 32.3 Implement `calculateQuizScore` and `isQuizPassing` in `src/lib/quiz.ts`
+    - Export `calculateQuizScore(correctAnswers: number, totalQuestions: number): number`
+    - Export `isQuizPassing(score: number, passingScore: number): boolean`
+    - _Requirements: 24.5, 24.6_
+
+  - [ ]* 32.4 Write property tests for quiz functions
+    - **Property 12: `calculateQuizScore` result is always in [0, 100]**
+    - **Property 13: `isQuizPassing` returns true iff score >= passingScore**
+    - **Validates: Requirements 24.5, 24.6**
+
+  - [ ] 32.5 Implement `calculateAttemptRate` in `src/lib/campaigns.ts`
+    - Export `calculateAttemptRate(count: number, totalRecipients: number): number`
+    - Return `Math.floor((count / totalRecipients) * 100)`, guard `totalRecipients === 0` → return 0
+    - _Requirements: 26.6_
+
+  - [ ]* 32.6 Write property tests for `calculateAttemptRate`
+    - **Property 15: Result is always in [0, 100] for any valid inputs**
+    - **Validates: Requirements 26.6**
+
+  - [ ] 32.7 Implement `reorderItems` in `src/lib/reorder.ts`
+    - Export `reorderItems<T extends { order: number }>(items: T[], fromIndex: number, toIndex: number): T[]`
+    - Splice item from `fromIndex`, insert at `toIndex`, reassign `order` as 1-based index
+    - _Requirements: 22.8_
+
+  - [ ]* 32.8 Write property tests for `reorderItems`
+    - **Property 14: Output length equals input length (no items lost or duplicated)**
+    - **Property 14: fromIndex === toIndex produces identical order values**
+    - **Property 14: Output order values form a contiguous sequence starting at 1**
+    - **Validates: Requirements 22.8**
+
+- [ ] 33. Checkpoint — Ensure all 95 existing tests still pass
+  - Run `npm test --run` and confirm all existing tests pass before adding new code.
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 34. Implement Course Management Server Actions
+  - [ ] 34.1 Create `src/actions/courses.ts` with course CRUD actions
+    - Implement `createCourse(data)`: call `auth()`, derive `organizationId`, validate non-empty title, `prisma.course.create`, `revalidatePath('/admin/courses')`
+    - Implement `updateCourse(courseId, data)`: verify course belongs to org, `prisma.course.update`
+    - Implement `publishCourse(courseId)` and `unpublishCourse(courseId)`: set `isPublished` boolean
+    - Implement `deleteCourse(courseId)`: verify ownership, `prisma.course.delete` (cascades)
+    - _Requirements: 22.2, 22.3, 22.4, 22.5, 22.9, 22.10, 27.1, 27.2, 28.2, 28.4_
+
+  - [ ] 34.2 Add module and lesson CRUD actions to `src/actions/courses.ts`
+    - Implement `createModule(courseId, data)`, `updateModule(moduleId, data)`, `deleteModule(moduleId)`
+    - Implement `createLesson(moduleId, data)`, `updateLesson(lessonId, data)`, `deleteLesson(lessonId)`
+    - Each action verifies the parent course belongs to the admin's org before writing
+    - _Requirements: 22.6, 22.7, 27.1, 27.2_
+
+  - [ ] 34.3 Add reorder actions to `src/actions/courses.ts`
+    - Implement `reorderModules(courseId, orderedModuleIds: string[])`: update `order` field on each module in a transaction
+    - Implement `reorderLessons(moduleId, orderedLessonIds: string[])`: update `order` field on each lesson in a transaction
+    - Use `prisma.$transaction` to apply all order updates atomically
+    - _Requirements: 22.8, 27.1_
+
+  - [ ]* 34.4 Write unit tests for course Server Actions
+    - Test `createCourse` creates record with correct `organizationId`
+    - Test `createCourse` rejects empty title
+    - Test `deleteCourse` is rejected when course belongs to a different org
+    - Test `publishCourse` / `unpublishCourse` toggle `isPublished`
+    - _Requirements: 22.2, 22.4, 22.9, 22.10_
+
+- [ ] 35. Build Admin Course Management UI
+  - [ ] 35.1 Create `/admin/courses` page (Server Component)
+    - Fetch `prisma.course.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' } })`
+    - Render a list of course cards showing title, published status, module count
+    - Include "New Course" button linking to `/admin/courses/new`
+    - _Requirements: 22.1, 22.9_
+
+  - [ ] 35.2 Create `/admin/courses/new` page with `CourseForm` Client Component
+    - Server Component shell renders `CourseForm` with empty initial values
+    - `CourseForm` manages title, description, coverImageUrl fields
+    - On submit, calls `createCourse` Server Action and redirects to the new course edit page
+    - _Requirements: 22.2, 22.10, 28.1, 28.3_
+
+  - [ ] 35.3 Create `/admin/courses/[courseId]` edit page (Server Component + Client Components)
+    - Fetch course with modules and lessons (ordered by `order` field)
+    - Render `CourseForm` pre-populated with existing values for editing
+    - Render publish/unpublish toggle button calling `publishCourse` / `unpublishCourse`
+    - Render delete button with confirmation dialog calling `deleteCourse`
+    - _Requirements: 22.3, 22.4, 22.5, 28.3_
+
+  - [ ] 35.4 Create `ModuleList` and `LessonList` Client Components with reordering
+    - `ModuleList` renders modules in `order` sequence with drag-and-drop (or up/down buttons)
+    - On reorder, calls `reorderModules` Server Action
+    - Each module row has edit, delete, and "add lesson" controls
+    - `LessonList` mirrors the same pattern for lessons within a module
+    - _Requirements: 22.6, 22.7, 22.8, 28.3_
+
+- [ ] 36. Implement Enrollment Server Actions
+  - [ ] 36.1 Create `src/actions/enrollments.ts`
+    - Implement `enrollInCourse(courseId)`: call `auth()`, derive userId and organizationId, verify course is published and belongs to org, `prisma.enrollment.create({ data: { userId, courseId, progressPercentage: 0 } })`, handle unique constraint violation gracefully
+    - _Requirements: 23.4, 23.6, 23.7, 27.1, 27.2, 28.2, 28.4_
+
+  - [ ] 36.2 Implement `completeLessonAndUpdateProgress` in `src/actions/enrollments.ts`
+    - Verify enrollment belongs to the authenticated user
+    - `prisma.lessonProgress.upsert` with `completed: true`, `completedAt: now()`
+    - Count total lessons and completed lessons for the enrollment
+    - Call `calculateProgressPercentage` and update `Enrollment.progressPercentage`
+    - If `newProgress === 100`, set `Enrollment.completedAt = now()`
+    - `revalidatePath` for the course and lesson pages
+    - _Requirements: 25.1, 25.2, 24.7, 27.1_
+
+  - [ ]* 36.3 Write unit tests for enrollment Server Actions
+    - Test `enrollInCourse` creates enrollment with `progressPercentage = 0`
+    - Test `enrollInCourse` returns error on duplicate without creating a second record
+    - Test `completeLessonAndUpdateProgress` recalculates progress correctly
+    - Test `completeLessonAndUpdateProgress` sets `completedAt` when progress reaches 100
+    - _Requirements: 23.4, 23.6, 25.1, 25.2_
+
+- [ ] 37. Build Learner Course Catalog and Detail Pages
+  - [ ] 37.1 Create `/learner/courses` catalog page (Server Component)
+    - Fetch published courses for the learner's org with enrollment status for the current user
+    - Render `CourseCard` grid showing title, description excerpt, module count, lesson count, duration, and enrollment progress if enrolled
+    - _Requirements: 23.1, 23.2, 23.7, 23.8, 30.2_
+
+  - [ ] 37.2 Create `CourseCard` component
+    - Display title, description excerpt (truncated to ~120 chars), module count, total lesson count, estimated duration
+    - Show progress bar if learner is enrolled
+    - _Requirements: 23.2, 25.3_
+
+  - [ ] 37.3 Create `/learner/courses/[courseId]` detail page (Server Component)
+    - Fetch course with modules and lessons, and the learner's enrollment if it exists
+    - Render full description, module/lesson list, and enrollment status
+    - Render "Enroll" button (calls `enrollInCourse`) if not enrolled
+    - Render "Continue Learning" link to the first incomplete lesson if enrolled
+    - _Requirements: 23.3, 23.5, 23.7, 25.4_
+
+- [ ] 38. Build Lesson Viewer
+  - [ ] 38.1 Create `/learner/courses/[courseId]/lessons/[lessonId]` page (Server Component)
+    - Fetch lesson, verify learner is enrolled (redirect to course detail if not)
+    - Fetch `LessonProgress` for this lesson to show completion state
+    - Render type-specific viewer component based on `lesson.type`
+    - Render previous/next lesson navigation links
+    - _Requirements: 24.1, 24.8, 24.9, 24.10_
+
+  - [ ] 38.2 Create `VideoPlayer` Client Component
+    - Render `<iframe>` or `<video>` element using `lesson.videoUrl`
+    - On video end event, call `completeLessonAndUpdateProgress` Server Action
+    - Show "Mark as Complete" button as fallback for non-auto-detectable completion
+    - _Requirements: 24.2, 24.7_
+
+  - [ ] 38.3 Create `MarkdownRenderer` Client Component
+    - Render `lesson.content` as sanitized HTML (use `dangerouslySetInnerHTML` with a sanitizer, or a Markdown library)
+    - Render "Mark as Complete" button; on click, call `completeLessonAndUpdateProgress`
+    - _Requirements: 24.3, 24.7_
+
+  - [ ] 38.4 Create `QuizForm` Client Component
+    - Fetch and render all `QuizQuestion` records with multiple-choice options from the `options` JSON field
+    - Manage selected answers in local state
+    - On submit, call `calculateQuizScore` and `isQuizPassing` client-side to display immediate result
+    - Call `completeLessonAndUpdateProgress` Server Action after submission
+    - Display score, pass/fail result, and passing threshold to the learner
+    - _Requirements: 24.4, 24.5, 24.6, 24.7_
+
+- [ ] 39. Checkpoint — Verify lesson viewer and progress tracking end-to-end
+  - Run `npm test --run` and confirm all tests pass.
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 40. Build Progress Display on Learner Dashboard
+  - [ ] 40.1 Update learner dashboard page to show enrolled courses with progress
+    - Fetch `prisma.enrollment.findMany({ where: { userId }, include: { course: true } })`
+    - Render each enrollment as a card with course title and a `<Progress>` bar (shadcn/ui) showing `progressPercentage`
+    - _Requirements: 25.3, 30.1_
+
+  - [ ]* 40.2 Write unit tests for learner dashboard progress display
+    - Test that enrollments with various `progressPercentage` values render the correct progress bar value
+    - _Requirements: 25.3_
+
+- [ ] 41. Build Admin Course Stats Page
+  - [ ] 41.1 Create `/admin/courses/[courseId]/stats` page (Server Component)
+    - Fetch total enrollment count for the course
+    - Fetch count of enrollments where `completedAt IS NOT NULL`
+    - Calculate completion percentage using `calculateProgressPercentage(completions, total)`
+    - Render stats cards: Total Enrollments, Completions, Completion Rate
+    - _Requirements: 25.5, 25.6_
+
+  - [ ]* 41.2 Write unit tests for stats page data fetching
+    - Test that stats are scoped to the admin's organization
+    - _Requirements: 25.5, 25.6_
+
+- [ ] 42. Implement Phishing Campaign Server Actions
+  - [ ] 42.1 Create `src/actions/campaigns.ts`
+    - Implement `createCampaign(data)`: call `auth()`, derive `organizationId`, validate non-empty title, `prisma.phishingCampaign.create({ data: { ...data, status: 'DRAFT', organizationId, createdById } })`
+    - _Requirements: 26.2, 26.8, 27.1, 28.2, 28.4_
+
+  - [ ] 42.2 Implement `transitionCampaignStatus` in `src/actions/campaigns.ts`
+    - Define `VALID_TRANSITIONS` map: `DRAFT → SCHEDULED`, `SCHEDULED → RUNNING`, `RUNNING → COMPLETED`
+    - Fetch current campaign status, verify it belongs to the admin's org
+    - Validate the requested `newStatus` is the valid next state; throw if not
+    - `prisma.phishingCampaign.update({ data: { status: newStatus } })`
+    - _Requirements: 26.3, 27.1, 27.2_
+
+  - [ ]* 42.3 Write unit tests for campaign Server Actions
+    - Test `createCampaign` creates record with status `DRAFT` and correct `organizationId`
+    - Test `createCampaign` rejects empty title
+    - Test `transitionCampaignStatus` allows `DRAFT → SCHEDULED`
+    - Test `transitionCampaignStatus` rejects `DRAFT → RUNNING` (skipping a step)
+    - Test `transitionCampaignStatus` rejects any transition from `COMPLETED`
+    - _Requirements: 26.2, 26.3, 26.8_
+
+- [ ] 43. Build Phishing Campaign Management UI
+  - [ ] 43.1 Create `/admin/campaigns` page (Server Component)
+    - Fetch `prisma.phishingCampaign.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' } })`
+    - Render campaign list with title, status badge, and creation date
+    - Include "New Campaign" button linking to `/admin/campaigns/new`
+    - _Requirements: 26.1, 26.7_
+
+  - [ ] 43.2 Create `/admin/campaigns/new` page with `CampaignForm` Client Component
+    - `CampaignForm` manages title and description fields
+    - On submit, calls `createCampaign` Server Action and redirects to the campaign detail page
+    - _Requirements: 26.2, 26.8, 28.3_
+
+  - [ ] 43.3 Create `/admin/campaigns/[campaignId]` detail page (Server Component)
+    - Fetch campaign with all `PhishingAttempt` records
+    - Calculate opened rate, clicked rate, reported rate using `calculateAttemptRate`
+    - Render campaign metadata, status badge, and stats cards
+    - Render `CampaignStatusButton` Client Component for status transitions
+    - _Requirements: 26.4, 26.5, 26.6, 26.7_
+
+  - [ ] 43.4 Create `CampaignStatusButton` Client Component
+    - Determine the next valid status from the current status
+    - Render a button labeled with the next transition (e.g., "Schedule", "Start", "Complete")
+    - On click, call `transitionCampaignStatus` Server Action
+    - Disable button if no valid next transition exists (campaign is COMPLETED or PAUSED)
+    - _Requirements: 26.3, 28.3_
+
+- [ ] 44. Update Admin Sidebar Navigation
+  - [ ] 44.1 Update `SidebarNav` to link to real Phase 4 routes
+    - Replace placeholder "Courses" link with `/admin/courses`
+    - Replace placeholder "Phishing Campaigns" link with `/admin/campaigns`
+    - _Requirements: 22.1, 26.1_
+
+- [ ] 45. Update Learner Navigation
+  - [ ] 45.1 Update learner top nav to link to real Phase 4 routes
+    - Replace placeholder "My Courses" link with `/learner/courses`
+    - _Requirements: 23.1_
+
+- [ ] 46. Checkpoint — Final Phase 4 verification
+  - Run `npm test --run` and confirm all tests pass (existing 95 + new Phase 4 tests).
+  - Run `npm run build` and confirm it exits with code 0.
+  - Verify all Phase 4 pages render without TypeScript errors.
+  - Confirm multi-tenant scoping: a learner cannot access courses from another organization.
+  - Ensure all tests pass, ask the user if questions arise.
+
+## Notes
+
+- Phase 4 builds exclusively on the Phase 3 schema — no schema changes are required.
+- All existing Phase 1, 2, and 3 functionality must continue to work.
+- Pure functions in `src/lib/` are the primary targets for property-based tests.
+- Server Actions must always derive `organizationId` from `auth()` — never trust client-supplied org IDs.
+- Client Components are limited to: forms, drag-and-drop reordering, video player, quiz interaction, and status buttons.
+- The `revalidatePath` call after each mutation ensures Server Components re-fetch fresh data.
+- Tasks marked with `*` are optional and can be skipped for a faster MVP.

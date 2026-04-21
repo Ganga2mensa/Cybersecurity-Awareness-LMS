@@ -12,6 +12,12 @@ vi.mock('next/link', () => ({
 
 vi.mock('lucide-react', () => ({
   Menu: () => null,
+  Sun: () => null,
+  Moon: () => null,
+}))
+
+vi.mock('next-themes', () => ({
+  useTheme: () => ({ theme: 'dark', setTheme: () => {} }),
 }))
 
 describe('Navbar', () => {
@@ -24,7 +30,7 @@ describe('Navbar', () => {
 
   it('renders a link with href="/sign-up" and text "Get Started" (Req 8.9)', () => {
     render(<Navbar />)
-    const getStartedLink = screen.getByRole('link', { name: 'Get Started' })
+    const getStartedLink = screen.getByRole('link', { name: /get started/i })
     expect(getStartedLink).toBeInTheDocument()
     expect(getStartedLink).toHaveAttribute('href', '/sign-up')
   })

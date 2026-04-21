@@ -618,3 +618,872 @@ src/
 scripts/
 └── smoke-tests.ts               # CI smoke checks for config files
 ```
+
+---
+
+## Phase 2 Design
+
+### Overview
+
+Phase 2 bridges Clerk (identity) and Prisma (application data). The two integration points are:
+
+1. **Clerk Webhooks** — Clerk emits events when users and organizations are created. A Next.js API route verifies the Svix signature and writes records to Prisma.
+2. **syncUserToDatabase Server Action** — Called on every dashboard load as a fallback. If the webhook was missed (e.g., during local development without a tunnel), this action ensures the user record exists before any data-dependent feature runs.
+
+Profile pages complete the loop by reading the synced Prisma records and displaying them to the user.
+
+---
+
+### Webhook Architecture
+
+```
+Clerk Dashboard
+      │
+      │  HTTP POST (signed with CLERK_WEBHOOK_SECRET)
+      ▼
+Svix Webhook Delivery
+      │
+      │  Forwards to registered endpoint
+      ▼
+/api/webhooks/clerk/route.ts   (Next.js API Route)
+      │
+      ├─ Verify Svix signature  ──── fail ──► 400 Bad Request
+      │
+      ├─ Parse event type
+      │     ├─ user.created              ──► prisma.user.upsert(...)
+      │     ├─ organization.created      ──► prisma.organization.upsert(...)
+      │     └─ organizationMembership.created ──► link user ↔ org, set role
+      │
+      └─ 200 OK  (or 500 on DB error)
+```
+
+**Why Svix?** Clerk uses Svix as its webhook delivery infrastructure. The `svix` npm package provides the `Webhook` class with a `verify()` method that validates the `svix-id`, `svix-timestamp`, and `svix-signature` headers against the webhook secret. This prevents replay attacks and spoofed payloads.
+
+---
+
+### Webhook Handler Implementation
+
+```typescript
+// src/app/api/webhooks/clerk/route.ts
+import { Webhook } from 'svix'
+import { headers } from 'next/headers'
+import { WebhookEvent } from '@clerk/nextjs/server'
+import { prisma } from '@/lib/prisma'
+
+export async function POST(req: Request) {
+  const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET
+  if (!WEBHOOK_SECRET) {
+    return new Response('Webhook secret not configured', { status: 500 })
+  }
+
+  // Read Svix headers
+  const headerPayload = await headers()
+  const svixId = headerPayload.get('svix-id')
+  const svixTimestamp = headerPayload.get('svix-timestamp')
+  const svixSignature = headerPayload.get('svix-signature')
+
+  if (!svixId || !svixTimestamp || !svixSignature) {
+    return new Response('Missing Svix headers', { status: 400 })
+  }
+
+  // Verify signature
+  const payload = await req.text()
+  const wh = new Webhook(WEBHOOK_SECRET)
+  let event: WebhookEvent
+
+  try {
+    event = wh.verify(payload, {
+      'svix-id': svixId,
+      'svix-timestamp': svixTimestamp,
+      'svix-signature': svixSignature,
+    }) as WebhookEvent
+  } catch {
+    return new Response('Invalid signature', { status: 400 })
+  }
+
+  // Handle events
+  try {
+    switch (event.type) {
+      case 'user.created': {
+        const { id, email_addresses, first_name, last_name } = event.data
+        const email = email_addresses[0]?.email_address ?? ''
+        const name = [first_name, last_name].filter(Boolean).join(' ') || null
+        await prisma.user.upsert({
+          where: { clerkId: id },
+          update: { email, name },
+          create: { clerkId: id, email, name, role: 'LEARNER', organizationId: '' },
+        })
+        break
+      }
+      case 'organization.created': {
+        const { id, name } = event.data
+        await prisma.organization.upsert({
+          where: { clerkOrgId: id },
+          update: { name },
+          create: { clerkOrgId: id, name },
+        })
+        break
+      }
+      case 'organizationMembership.created': {
+        const { public_user_data, organization, role } = event.data
+        const clerkUserId = public_user_data.user_id
+        const clerkOrgId = organization.id
+        const prismaRole = role === 'org:admin' ? 'ADMIN' : 'LEARNER'
+        const org = await prisma.organization.findUnique({ where: { clerkOrgId } })
+        if (org) {
+          await prisma.user.update({
+            where: { clerkId: clerkUserId },
+            data: { organizationId: org.id, role: prismaRole },
+          })
+        }
+        break
+      }
+    }
+    return new Response('OK', { status: 200 })
+  } catch {
+    return new Response('Database error', { status: 500 })
+  }
+}
+```
+
+---
+
+### syncUserToDatabase Server Action
+
+```typescript
+// src/actions/user.ts
+'use server'
+
+import { auth, currentUser } from '@clerk/nextjs/server'
+import { prisma } from '@/lib/prisma'
+
+export async function syncUserToDatabase(): Promise<void> {
+  const { userId, orgId, orgRole } = await auth()
+  if (!userId) return
+
+  const clerkUser = await currentUser()
+  if (!clerkUser) return
+
+  const email = clerkUser.emailAddresses[0]?.emailAddress ?? ''
+  const name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || null
+  const prismaRole = orgRole === 'org:admin' ? 'ADMIN' : 'LEARNER'
+
+  // Upsert organization first (if user belongs to one)
+  let organizationId = ''
+  if (orgId) {
+    const org = await prisma.organization.upsert({
+      where: { clerkOrgId: orgId },
+      update: {},
+      create: { clerkOrgId: orgId, name: orgId }, // name updated by webhook
+    })
+    organizationId = org.id
+  }
+
+  // Upsert user
+  await prisma.user.upsert({
+    where: { clerkId: userId },
+    update: { email, name, role: prismaRole, ...(organizationId ? { organizationId } : {}) },
+    create: { clerkId: userId, email, name, role: prismaRole, organizationId },
+  })
+}
+```
+
+**Rationale:** The Server Action is called at the top of both dashboard pages (`await syncUserToDatabase()`). It is idempotent — repeated calls are safe. The webhook is the primary sync path; this action is the safety net.
+
+---
+
+### Profile Page Component Design
+
+Both profile pages follow the same structure:
+
+```
+<ProfilePage>                    ← Server Component
+  ├─ fetch user from Prisma by clerkId
+  ├─ <ProfileCard>               ← displays name, email, org, role badge
+  └─ <EditNameForm>              ← Client Component
+       └─ calls updateDisplayName() Server Action on submit
+```
+
+#### Server Component (data fetching)
+
+```typescript
+// src/app/(admin)/admin/profile/page.tsx
+import { auth } from '@clerk/nextjs/server'
+import { prisma } from '@/lib/prisma'
+
+export default async function AdminProfilePage() {
+  const { userId } = await auth()
+  const user = await prisma.user.findUnique({
+    where: { clerkId: userId! },
+    include: { organization: true },
+  })
+  // render ProfileCard + EditNameForm with user data
+}
+```
+
+#### Client Component (edit form)
+
+```typescript
+// Inline or extracted to src/components/shared/EditNameForm.tsx
+'use client'
+
+import { useTransition } from 'react'
+import { updateDisplayName } from '@/actions/user'
+
+export function EditNameForm({ currentName }: { currentName: string | null }) {
+  const [isPending, startTransition] = useTransition()
+  // form with input + submit button
+  // calls startTransition(() => updateDisplayName(newName))
+}
+```
+
+#### updateDisplayName Server Action
+
+```typescript
+// Added to src/actions/user.ts
+export async function updateDisplayName(name: string): Promise<void> {
+  const { userId } = await auth()
+  if (!userId) throw new Error('Unauthenticated')
+  await prisma.user.update({
+    where: { clerkId: userId },
+    data: { name },
+  })
+}
+```
+
+---
+
+### Updated Folder Structure (Phase 2 additions)
+
+```
+secura-learn/
+├── src/
+│   ├── app/
+│   │   ├── api/
+│   │   │   └── webhooks/
+│   │   │       └── clerk/
+│   │   │           └── route.ts          # NEW — Clerk webhook handler
+│   │   ├── (admin)/
+│   │   │   └── admin/
+│   │   │       ├── dashboard/
+│   │   │       │   └── page.tsx          # UPDATED — calls syncUserToDatabase()
+│   │   │       └── profile/
+│   │   │           └── page.tsx          # NEW — admin profile page
+│   │   └── (learner)/
+│   │       └── learner/
+│   │           ├── dashboard/
+│   │           │   └── page.tsx          # UPDATED — calls syncUserToDatabase()
+│   │           └── profile/
+│   │               └── page.tsx          # NEW — learner profile page
+│   ├── actions/
+│   │   └── user.ts                       # UPDATED — real syncUserToDatabase + updateDisplayName
+│   └── components/
+│       └── shared/
+│           ├── SidebarNav.tsx            # UPDATED — adds Profile link
+│           ├── TopNav.tsx                # UPDATED — adds Profile link
+│           └── EditNameForm.tsx          # NEW — Client Component for name editing
+```
+
+---
+
+### Environment Variables (Phase 2 additions)
+
+```bash
+# ── Clerk Webhooks ─────────────────────────────────────────────────────────────
+# Webhook signing secret — obtain from Clerk Dashboard > Webhooks > your endpoint
+CLERK_WEBHOOK_SECRET="whsec_..."
+```
+
+---
+
+### Registering the Webhook in Clerk Dashboard
+
+1. Navigate to **Clerk Dashboard → Webhooks → Add Endpoint**.
+2. Set the URL to `https://{your-domain}/api/webhooks/clerk`.
+3. Select the following events: `user.created`, `organization.created`, `organizationMembership.created`.
+4. Copy the **Signing Secret** and set it as `CLERK_WEBHOOK_SECRET` in `.env.local`.
+5. For local development, use a tunnel (e.g., `ngrok http 3000`) to expose the local server.
+
+---
+
+### Phase 2 Correctness Properties
+
+#### Property 7: Webhook creates user record for any valid `user.created` event
+
+*For any* valid `user.created` webhook payload (arbitrary Clerk user ID, email, and name), the webhook handler SHALL upsert a `User` record in Prisma with the correct `clerkId` and `email` fields.
+
+**Validates: Requirements 12.2**
+
+#### Property 8: Profile page renders user name and email for any valid user record
+
+*For any* `User` record with a non-empty `name` and `email`, rendering the profile page SHALL produce output that contains both the user's name and email address as visible text.
+
+**Validates: Requirements 13.3**
+
+---
+
+### Phase 2 Testing Strategy
+
+#### Webhook Handler Tests
+
+The webhook handler is tested by mocking Svix's `Webhook.verify()` and the Prisma client:
+
+- **Valid signature + `user.created`** → `prisma.user.upsert` called with correct args, returns 200.
+- **Invalid signature** → `Webhook.verify()` throws → handler returns 400.
+- **Valid `organization.created`** → `prisma.organization.upsert` called, returns 200.
+- **Valid `organizationMembership.created`** → `prisma.user.update` called with correct role, returns 200.
+- **DB error** → Prisma throws → handler returns 500.
+
+#### Profile Page Tests
+
+Profile pages are tested by mocking `auth()` and `prisma.user.findUnique`:
+
+- **Admin profile** → renders user name, email, org name, and role badge.
+- **Learner profile** → same assertions.
+- **Edit form** → submitting a new name calls `updateDisplayName` Server Action.
+
+#### Property Test Implementation Notes
+
+**P7 — Webhook creates user record:**
+```typescript
+// Feature: secura-learn-platform, Property 7: Webhook creates user record for any valid user.created event
+fc.assert(fc.asyncProperty(
+  fc.record({
+    id: fc.string({ minLength: 1 }),
+    email: fc.emailAddress(),
+    firstName: fc.string(),
+    lastName: fc.string(),
+  }),
+  async (userData) => {
+    // mock Svix verify to return a user.created event with userData
+    // call the POST handler
+    // assert prisma.user.upsert was called with clerkId: userData.id
+  }
+))
+```
+
+**P8 — Profile page renders user data:**
+```typescript
+// Feature: secura-learn-platform, Property 8: Profile page renders user name and email for any valid user record
+fc.assert(fc.asyncProperty(
+  fc.record({
+    name: fc.string({ minLength: 1 }),
+    email: fc.emailAddress(),
+  }),
+  async ({ name, email }) => {
+    // mock prisma.user.findUnique to return { name, email, ... }
+    // render the profile page
+    // assert name and email appear in the output
+  }
+))
+```
+
+
+---
+
+## Phase 3 Design
+
+### Overview
+
+Phase 3 implements the complete Prisma schema for all core LMS entities. The schema is documented in `prisma/schema.prisma` and covers: Organization, User (extended), Course, Module, Lesson, Quiz, QuizQuestion, Enrollment, LessonProgress, PhishingCampaign, and PhishingAttempt. All models include proper foreign key relationships, cascade delete rules, performance indexes, and unique constraints. A comprehensive seed script populates realistic development data. The design is covered in detail in the task descriptions for tasks 25–31.
+
+---
+
+## Phase 4 Design
+
+### Overview
+
+Phase 4 builds the core LMS UI and business logic on top of the Phase 3 schema. It introduces five feature groups:
+
+1. **Course Management (Admin)** — CRUD for courses, modules, and lessons with reordering.
+2. **Learner Course Browsing & Enrollment** — Catalog, course detail, and self-enrollment.
+3. **Lesson Viewer** — Type-aware rendering for VIDEO, TEXT/READING, and QUIZ lessons.
+4. **Progress Tracking** — Automatic progress recalculation and dashboard display.
+5. **Phishing Campaign Management (Admin)** — Campaign CRUD and attempt statistics.
+
+All features follow the established patterns: Server Components for data fetching, Server Actions for mutations, Client Components only where interactivity is required, and strict multi-tenant scoping via `organizationId`.
+
+---
+
+### Architecture
+
+```
+Browser
+  │
+  ▼
+Edge Middleware (existing — no changes)
+  │
+  ├─ /admin/**  ──► Admin Route Group
+  │     ├─ /admin/courses                    Server Component (list)
+  │     ├─ /admin/courses/new                Server Component + Client Form
+  │     ├─ /admin/courses/[courseId]         Server Component (edit)
+  │     ├─ /admin/courses/[courseId]/modules Server Component (module editor)
+  │     ├─ /admin/courses/[courseId]/stats   Server Component (completion stats)
+  │     └─ /admin/campaigns                  Server Component (list + detail)
+  │
+  └─ /learner/**  ──► Learner Route Group
+        ├─ /learner/courses                  Server Component (catalog)
+        ├─ /learner/courses/[courseId]       Server Component (detail + enroll)
+        └─ /learner/courses/[courseId]/lessons/[lessonId]
+                                             Server Component + Client Components
+                                             (video player, quiz form)
+```
+
+**Data flow for mutations:**
+
+```
+Client Component (form/button)
+  │  calls Server Action
+  ▼
+src/actions/{domain}.ts
+  ├─ auth() → derive userId + organizationId
+  ├─ validate input
+  ├─ prisma.{model}.{operation}({ where: { organizationId }, ... })
+  └─ revalidatePath() → triggers Server Component re-render
+```
+
+---
+
+### Pure Functions
+
+Phase 4 introduces several pure calculation functions that are extracted into `src/lib/` for testability:
+
+#### `calculateProgressPercentage(completedLessons: number, totalLessons: number): number`
+
+```typescript
+// src/lib/progress.ts
+export function calculateProgressPercentage(
+  completedLessons: number,
+  totalLessons: number
+): number {
+  if (totalLessons === 0) return 0
+  return Math.floor((completedLessons / totalLessons) * 100)
+}
+```
+
+**Invariants:**
+- Result is always an integer in [0, 100].
+- `completedLessons = 0` → 0.
+- `completedLessons = totalLessons` → 100.
+- `totalLessons = 0` → 0 (guard against division by zero).
+
+#### `calculateQuizScore(correctAnswers: number, totalQuestions: number): number`
+
+```typescript
+// src/lib/quiz.ts
+export function calculateQuizScore(
+  correctAnswers: number,
+  totalQuestions: number
+): number {
+  if (totalQuestions === 0) return 0
+  return Math.round((correctAnswers / totalQuestions) * 100)
+}
+```
+
+**Invariants:**
+- Result is always an integer in [0, 100].
+- `correctAnswers = 0` → 0.
+- `correctAnswers = totalQuestions` → 100.
+
+#### `isQuizPassing(score: number, passingScore: number): boolean`
+
+```typescript
+// src/lib/quiz.ts
+export function isQuizPassing(score: number, passingScore: number): boolean {
+  return score >= passingScore
+}
+```
+
+**Invariants:**
+- `score >= passingScore` → true.
+- `score < passingScore` → false.
+
+#### `calculateAttemptRate(count: number, totalRecipients: number): number`
+
+```typescript
+// src/lib/campaigns.ts
+export function calculateAttemptRate(
+  count: number,
+  totalRecipients: number
+): number {
+  if (totalRecipients === 0) return 0
+  return Math.floor((count / totalRecipients) * 100)
+}
+```
+
+**Invariants:**
+- Result is always an integer in [0, 100].
+- `totalRecipients = 0` → 0.
+
+#### `reorderItems<T extends { order: number }>(items: T[], fromIndex: number, toIndex: number): T[]`
+
+```typescript
+// src/lib/reorder.ts
+export function reorderItems<T extends { order: number }>(
+  items: T[],
+  fromIndex: number,
+  toIndex: number
+): T[] {
+  const result = [...items]
+  const [moved] = result.splice(fromIndex, 1)
+  result.splice(toIndex, 0, moved)
+  return result.map((item, index) => ({ ...item, order: index + 1 }))
+}
+```
+
+**Invariants:**
+- Output length equals input length (no items lost or duplicated).
+- `fromIndex === toIndex` → output is identical to input (order values unchanged).
+- Output `order` values are a contiguous sequence starting at 1.
+
+---
+
+### Component Interfaces
+
+#### Server Actions
+
+```typescript
+// src/actions/courses.ts
+export async function createCourse(data: {
+  title: string
+  description?: string
+  coverImageUrl?: string
+}): Promise<{ courseId: string }>
+
+export async function updateCourse(
+  courseId: string,
+  data: { title?: string; description?: string; coverImageUrl?: string }
+): Promise<void>
+
+export async function publishCourse(courseId: string): Promise<void>
+export async function unpublishCourse(courseId: string): Promise<void>
+export async function deleteCourse(courseId: string): Promise<void>
+
+export async function createModule(
+  courseId: string,
+  data: { title: string; description?: string }
+): Promise<{ moduleId: string }>
+
+export async function updateModule(
+  moduleId: string,
+  data: { title?: string; description?: string }
+): Promise<void>
+
+export async function deleteModule(moduleId: string): Promise<void>
+
+export async function reorderModules(
+  courseId: string,
+  orderedModuleIds: string[]
+): Promise<void>
+
+export async function createLesson(
+  moduleId: string,
+  data: {
+    title: string
+    type: LessonType
+    content?: string
+    videoUrl?: string
+    durationMinutes?: number
+  }
+): Promise<{ lessonId: string }>
+
+export async function updateLesson(
+  lessonId: string,
+  data: {
+    title?: string
+    content?: string
+    videoUrl?: string
+    durationMinutes?: number
+  }
+): Promise<void>
+
+export async function deleteLesson(lessonId: string): Promise<void>
+
+export async function reorderLessons(
+  moduleId: string,
+  orderedLessonIds: string[]
+): Promise<void>
+```
+
+```typescript
+// src/actions/enrollments.ts
+export async function enrollInCourse(courseId: string): Promise<void>
+
+export async function completeLessonAndUpdateProgress(
+  enrollmentId: string,
+  lessonId: string
+): Promise<{ newProgressPercentage: number }>
+```
+
+```typescript
+// src/actions/campaigns.ts
+export async function createCampaign(data: {
+  title: string
+  description?: string
+}): Promise<{ campaignId: string }>
+
+export async function transitionCampaignStatus(
+  campaignId: string,
+  newStatus: CampaignStatus
+): Promise<void>
+```
+
+#### Key Server Components
+
+```typescript
+// src/app/(admin)/admin/courses/page.tsx
+// Fetches: prisma.course.findMany({ where: { organizationId } })
+// Renders: CourseList with create button
+
+// src/app/(admin)/admin/courses/[courseId]/page.tsx
+// Fetches: course with modules and lessons
+// Renders: CourseEditor (title/description form) + ModuleList
+
+// src/app/(admin)/admin/courses/[courseId]/stats/page.tsx
+// Fetches: enrollment count, completion count
+// Renders: StatsCard components
+
+// src/app/(learner)/learner/courses/page.tsx
+// Fetches: published courses for org, with enrollment status for current user
+// Renders: CourseCard grid
+
+// src/app/(learner)/learner/courses/[courseId]/page.tsx
+// Fetches: course detail + enrollment status
+// Renders: CourseDetail + EnrollButton or ContinueLearningButton
+
+// src/app/(learner)/learner/courses/[courseId]/lessons/[lessonId]/page.tsx
+// Fetches: lesson + enrollment + lessonProgress
+// Renders: LessonViewer (type-specific) + prev/next navigation
+```
+
+#### Key Client Components
+
+```typescript
+// src/components/courses/CourseForm.tsx
+// 'use client' — manages form state for create/edit course
+
+// src/components/courses/ModuleList.tsx
+// 'use client' — drag-and-drop reordering, calls reorderModules action
+
+// src/components/courses/LessonList.tsx
+// 'use client' — drag-and-drop reordering, calls reorderLessons action
+
+// src/components/lessons/VideoPlayer.tsx
+// 'use client' — iframe/video element, fires completeLessonAndUpdateProgress on end
+
+// src/components/lessons/QuizForm.tsx
+// 'use client' — manages answer selection state, calculates score on submit,
+//               calls completeLessonAndUpdateProgress
+
+// src/components/lessons/MarkdownRenderer.tsx
+// 'use client' — renders sanitized HTML/Markdown content
+
+// src/components/campaigns/CampaignStatusButton.tsx
+// 'use client' — renders next valid transition button, calls transitionCampaignStatus
+```
+
+---
+
+### Folder Structure (Phase 4 additions)
+
+```
+secura-learn/
+├── src/
+│   ├── actions/
+│   │   ├── courses.ts          # NEW — course/module/lesson CRUD + reorder
+│   │   ├── enrollments.ts      # NEW — enroll + complete lesson + progress update
+│   │   └── campaigns.ts        # NEW — campaign CRUD + status transitions
+│   ├── lib/
+│   │   ├── progress.ts         # NEW — calculateProgressPercentage (pure)
+│   │   ├── quiz.ts             # NEW — calculateQuizScore, isQuizPassing (pure)
+│   │   ├── campaigns.ts        # NEW — calculateAttemptRate (pure)
+│   │   └── reorder.ts          # NEW — reorderItems (pure)
+│   ├── app/
+│   │   ├── (admin)/
+│   │   │   └── admin/
+│   │   │       ├── courses/
+│   │   │       │   ├── page.tsx                    # NEW — course list
+│   │   │       │   ├── new/
+│   │   │       │   │   └── page.tsx                # NEW — create course
+│   │   │       │   └── [courseId]/
+│   │   │       │       ├── page.tsx                # NEW — edit course + modules
+│   │   │       │       └── stats/
+│   │   │       │           └── page.tsx            # NEW — completion stats
+│   │   │       └── campaigns/
+│   │   │           ├── page.tsx                    # NEW — campaign list
+│   │   │           ├── new/
+│   │   │           │   └── page.tsx                # NEW — create campaign
+│   │   │           └── [campaignId]/
+│   │   │               └── page.tsx                # NEW — campaign detail + stats
+│   │   └── (learner)/
+│   │       └── learner/
+│   │           └── courses/
+│   │               ├── page.tsx                    # NEW — course catalog
+│   │               └── [courseId]/
+│   │                   ├── page.tsx                # NEW — course detail + enroll
+│   │                   └── lessons/
+│   │                       └── [lessonId]/
+│   │                           └── page.tsx        # NEW — lesson viewer
+│   └── components/
+│       ├── courses/
+│       │   ├── CourseForm.tsx          # NEW — create/edit form (Client)
+│       │   ├── CourseCard.tsx          # NEW — catalog card (Server)
+│       │   ├── ModuleList.tsx          # NEW — reorderable module list (Client)
+│       │   └── LessonList.tsx          # NEW — reorderable lesson list (Client)
+│       ├── lessons/
+│       │   ├── VideoPlayer.tsx         # NEW — video embed (Client)
+│       │   ├── QuizForm.tsx            # NEW — interactive quiz (Client)
+│       │   └── MarkdownRenderer.tsx    # NEW — HTML/MD renderer (Client)
+│       └── campaigns/
+│           ├── CampaignForm.tsx        # NEW — create form (Client)
+│           └── CampaignStatusButton.tsx # NEW — status transition (Client)
+```
+
+---
+
+### Data Flow: Complete Lesson and Update Progress
+
+```
+Learner clicks "Complete" / submits quiz
+  │
+  ▼
+completeLessonAndUpdateProgress(enrollmentId, lessonId)   [Server Action]
+  │
+  ├─ auth() → verify organizationId ownership of enrollment
+  │
+  ├─ prisma.lessonProgress.upsert({
+  │     where: { enrollmentId_lessonId: { enrollmentId, lessonId } },
+  │     update: { completed: true, completedAt: now() },
+  │     create: { enrollmentId, lessonId, completed: true, completedAt: now() }
+  │   })
+  │
+  ├─ Count total lessons in course (via enrollment → course → modules → lessons)
+  │
+  ├─ Count completed lessons for this enrollment
+  │
+  ├─ newProgress = calculateProgressPercentage(completed, total)
+  │
+  ├─ prisma.enrollment.update({
+  │     where: { id: enrollmentId },
+  │     data: {
+  │       progressPercentage: newProgress,
+  │       completedAt: newProgress === 100 ? now() : null
+  │     }
+  │   })
+  │
+  └─ revalidatePath('/learner/courses/[courseId]')
+     return { newProgressPercentage: newProgress }
+```
+
+---
+
+### Campaign Status State Machine
+
+```
+DRAFT ──────► SCHEDULED ──────► RUNNING ──────► COMPLETED
+```
+
+Only forward transitions are permitted. The `transitionCampaignStatus` Server Action validates the transition before writing:
+
+```typescript
+const VALID_TRANSITIONS: Record<CampaignStatus, CampaignStatus | null> = {
+  DRAFT: 'SCHEDULED',
+  SCHEDULED: 'RUNNING',
+  RUNNING: 'COMPLETED',
+  COMPLETED: null,
+  PAUSED: null,
+}
+```
+
+---
+
+### Phase 4 Correctness Properties
+
+#### Property 9: Progress percentage is always in [0, 100] for any valid lesson counts
+
+*For any* non-negative integers `completedLessons` and `totalLessons` where `completedLessons ≤ totalLessons`, `calculateProgressPercentage(completedLessons, totalLessons)` SHALL return an integer in the range [0, 100].
+
+**Validates: Requirements 25.1, 25.7**
+
+#### Property 10: Progress percentage is 0 when no lessons are completed
+
+*For any* positive integer `totalLessons`, `calculateProgressPercentage(0, totalLessons)` SHALL return 0.
+
+**Validates: Requirements 25.1**
+
+#### Property 11: Progress percentage is 100 when all lessons are completed
+
+*For any* positive integer `totalLessons`, `calculateProgressPercentage(totalLessons, totalLessons)` SHALL return 100.
+
+**Validates: Requirements 25.1, 25.2**
+
+#### Property 12: Quiz score is always in [0, 100] for any valid answer counts
+
+*For any* non-negative integers `correctAnswers` and `totalQuestions` where `correctAnswers ≤ totalQuestions`, `calculateQuizScore(correctAnswers, totalQuestions)` SHALL return an integer in the range [0, 100].
+
+**Validates: Requirements 24.5**
+
+#### Property 13: Quiz pass/fail is consistent with score and passingScore threshold
+
+*For any* integers `score` in [0, 100] and `passingScore` in [0, 100], `isQuizPassing(score, passingScore)` SHALL return `true` if and only if `score >= passingScore`.
+
+**Validates: Requirements 24.6**
+
+#### Property 14: Reordering preserves all items with no duplicates
+
+*For any* non-empty array of items and valid `fromIndex` and `toIndex` values, `reorderItems(items, fromIndex, toIndex)` SHALL return an array of the same length containing the same items (as a permutation), with `order` values forming a contiguous sequence starting at 1.
+
+**Validates: Requirements 22.8**
+
+#### Property 15: Attempt rate is always in [0, 100] for any valid counts
+
+*For any* non-negative integers `count` and `totalRecipients` where `count ≤ totalRecipients`, `calculateAttemptRate(count, totalRecipients)` SHALL return an integer in the range [0, 100].
+
+**Validates: Requirements 26.6**
+
+---
+
+### Phase 4 Testing Strategy
+
+#### Property-Based Tests
+
+| Property | Function | Generator |
+|---|---|---|
+| P9: Progress in [0,100] | `calculateProgressPercentage` | `fc.nat()` for both args, filter `completed ≤ total` |
+| P10: Progress 0 when none complete | `calculateProgressPercentage` | `fc.nat({ min: 1 })` for total |
+| P11: Progress 100 when all complete | `calculateProgressPercentage` | `fc.nat({ min: 1 })` for total |
+| P12: Quiz score in [0,100] | `calculateQuizScore` | `fc.nat()` for both args, filter `correct ≤ total` |
+| P13: Pass/fail consistent with threshold | `isQuizPassing` | `fc.integer({ min: 0, max: 100 })` for both |
+| P14: Reorder preserves items | `reorderItems` | `fc.array(fc.record({...}))`, valid index pair |
+| P15: Attempt rate in [0,100] | `calculateAttemptRate` | `fc.nat()` for both args, filter `count ≤ total` |
+
+#### Unit Tests
+
+- `createCourse` action: creates record with correct `organizationId`, rejects empty title.
+- `publishCourse` / `unpublishCourse`: toggles `isPublished` correctly.
+- `deleteCourse`: cascade-deletes modules and lessons.
+- `enrollInCourse`: creates `Enrollment` with `progressPercentage = 0`.
+- `enrollInCourse` duplicate: returns error without creating duplicate.
+- `completeLessonAndUpdateProgress`: upserts `LessonProgress`, recalculates progress, sets `completedAt` when 100%.
+- `transitionCampaignStatus`: allows valid transitions, rejects invalid ones.
+- Course catalog page: only shows published courses from the learner's org.
+- Lesson viewer: redirects unenrolled learner to course detail page.
+
+#### Test File Organization (Phase 4 additions)
+
+```
+src/__tests__/
+├── lib/
+│   ├── progress.test.ts          # P9, P10, P11 + unit tests
+│   ├── quiz.test.ts              # P12, P13 + unit tests
+│   ├── campaigns.test.ts         # P15 + unit tests
+│   └── reorder.test.ts           # P14 + unit tests
+├── actions/
+│   ├── courses.test.ts           # Server Action unit tests
+│   ├── enrollments.test.ts       # Server Action unit tests
+│   └── campaigns.test.ts         # Server Action unit tests
+└── pages/
+    ├── admin-courses.test.tsx     # Page rendering tests
+    ├── learner-catalog.test.tsx   # Page rendering tests
+    └── lesson-viewer.test.tsx     # Page rendering tests
+```

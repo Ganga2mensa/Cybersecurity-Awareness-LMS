@@ -4,6 +4,7 @@ import { SidebarNav } from '@/components/shared/SidebarNav'
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/admin/dashboard',
+  useRouter: () => ({ push: vi.fn() }),
 }))
 
 vi.mock('next/link', () => ({
@@ -15,7 +16,7 @@ vi.mock('next/link', () => ({
 }))
 
 vi.mock('@clerk/nextjs', () => ({
-  SignOutButton: ({ children }: any) => <>{children}</>,
+  useClerk: () => ({ signOut: vi.fn() }),
 }))
 
 describe('Admin SidebarNav (Req 9.3)', () => {

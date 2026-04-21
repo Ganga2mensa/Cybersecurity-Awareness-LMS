@@ -39,7 +39,7 @@ vi.mock('@clerk/nextjs/server', () => ({
 }))
 
 // Import proxy AFTER mock setup so capturedHandlerRef.current is populated
-import '@/proxy
+import '@/proxy'
 
 // ---------------------------------------------------------------------------
 // Helpers

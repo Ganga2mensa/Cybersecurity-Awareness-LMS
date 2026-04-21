@@ -4,6 +4,7 @@ import { TopNav } from '@/components/shared/TopNav'
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/learner/dashboard',
+  useRouter: () => ({ push: vi.fn() }),
 }))
 
 vi.mock('next/link', () => ({
@@ -15,7 +16,7 @@ vi.mock('next/link', () => ({
 }))
 
 vi.mock('@clerk/nextjs', () => ({
-  SignOutButton: ({ children }: any) => <>{children}</>,
+  useClerk: () => ({ signOut: vi.fn() }),
 }))
 
 describe('Learner TopNav (Req 10.3)', () => {
