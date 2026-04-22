@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { VideoPlayer } from "@/components/lessons/VideoPlayer"
 import { MarkdownRenderer } from "@/components/lessons/MarkdownRenderer"
 import { QuizForm } from "@/components/lessons/QuizForm"
+import { ScormViewer } from "@/components/lessons/ScormViewer"
 
 interface LessonViewerPageProps {
   params: Promise<{ courseId: string; lessonId: string }>
@@ -151,8 +152,17 @@ export default async function LessonViewerPage({ params }: LessonViewerPageProps
           <p className="text-muted-foreground">No quiz questions available for this lesson.</p>
         )}
 
-        {lesson.type === "SCORM" && (
-          <p className="text-muted-foreground">SCORM content is not yet supported.</p>
+        {lesson.type === "SCORM" && lesson.scormPackageUrl && (
+          <ScormViewer
+            scormPackageUrl={lesson.scormPackageUrl}
+            enrollmentId={enrollment.id}
+            lessonId={lessonId}
+            isCompleted={isCompleted}
+          />
+        )}
+
+        {lesson.type === "SCORM" && !lesson.scormPackageUrl && (
+          <p className="text-muted-foreground">No SCORM package URL provided for this lesson.</p>
         )}
       </div>
 

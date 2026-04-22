@@ -480,3 +480,87 @@ The platform serves three primary user roles:
 2. ALL Phase 4 pages SHALL be fully responsive across mobile (≥ 320px), tablet (≥ 768px), and desktop (≥ 1280px) viewport widths.
 3. THE Platform SHALL display loading states (skeleton loaders or spinners) during Server Action execution.
 4. THE Platform SHALL display error messages to the user when Server Actions fail.
+
+---
+
+## Phase 5 Requirements
+
+### Requirement 31: User Management (Admin)
+
+**User Story:** As an admin, I want to view and manage all users in my organization, so that I can oversee who has access and what roles they hold.
+
+#### Acceptance Criteria
+
+1. THE Platform SHALL provide a user management page at `/admin/users` listing all users in the admin's organization with their name, email, role, and enrollment count.
+2. EACH user row SHALL display the user's full name (or email if no name), email address, role badge, and total enrollment count.
+3. THE Platform SHALL allow an admin to change a user's role (ADMIN, LEARNER, MANAGER) via a Server Action that updates the `User.role` field.
+4. THE Platform SHALL provide a user detail page at `/admin/users/[userId]` showing the user's profile information and all their enrollments with progress.
+5. THE user detail page SHALL display each enrollment with course title, progress percentage, enrolled date, and completed date (if applicable).
+6. ALL user management operations SHALL be scoped to the admin's organization — an admin SHALL NOT be able to view or modify users from another organization.
+7. THE Platform SHALL prevent an admin from changing their own role to avoid accidental self-lockout.
+8. THE role change Server Action SHALL call `auth()` and verify the target user belongs to the admin's organization before updating.
+
+---
+
+### Requirement 32: Analytics Dashboard (Admin)
+
+**User Story:** As an admin, I want an organization-wide analytics dashboard, so that I can monitor training progress and phishing campaign effectiveness at a glance.
+
+#### Acceptance Criteria
+
+1. THE Platform SHALL provide an analytics page at `/admin/analytics` displaying organization-wide statistics.
+2. THE analytics page SHALL display the following summary stats: total users, total courses, total enrollments, and overall completion rate (percentage of enrollments with `completedAt IS NOT NULL`).
+3. THE analytics page SHALL display a per-course table showing each course's title, total enrollment count, and completion count.
+4. THE analytics page SHALL display a phishing campaign summary showing: total campaigns, total phishing attempts, and average click rate across all campaigns.
+5. ALL stat cards SHALL use shadcn/ui `Card` components with orange accent colors.
+6. ALL analytics data SHALL be scoped to the admin's organization.
+7. THE completion rate SHALL be calculated as `floor((completedEnrollments / totalEnrollments) * 100)`, returning 0 if there are no enrollments.
+8. THE average click rate SHALL be calculated as `floor((totalClicked / totalAttempts) * 100)`, returning 0 if there are no attempts.
+9. THE Platform SHALL NOT use any external chart library — display data using progress bars, numbers, and tables only.
+
+---
+
+### Requirement 33: Learner Progress Dashboard
+
+**User Story:** As a learner, I want a dedicated progress page showing all my enrolled courses and quiz scores, so that I can track my training completion in detail.
+
+#### Acceptance Criteria
+
+1. THE Platform SHALL provide a learner progress page at `/learner/progress` showing all courses the learner is enrolled in.
+2. EACH course entry SHALL display: course title, progress percentage as a visual progress bar, enrolled date, and completed date (if the course is completed).
+3. THE progress page SHALL display quiz scores for any completed quizzes within each enrolled course.
+4. THE learner top nav "Progress" link SHALL point to `/learner/progress`.
+5. ALL progress data SHALL be scoped to the authenticated learner's user record.
+6. THE progress page SHALL display a message when the learner has no enrollments.
+
+---
+
+### Requirement 34: Badges and Certificates
+
+**User Story:** As a learner, I want to earn badges when I complete courses, so that I feel recognized for my training achievements.
+
+#### Acceptance Criteria
+
+1. WHEN a learner's `Enrollment.completedAt` is set (i.e., `progressPercentage = 100`), THE Platform SHALL treat that enrollment as an earned badge — no separate database table is required.
+2. THE Platform SHALL provide a badges page at `/learner/badges` showing one badge per completed course.
+3. EACH badge SHALL display the course name and the completion date.
+4. THE learner top nav "Badges" link SHALL point to `/learner/badges`.
+5. THE learner dashboard SHALL display the total count of earned badges.
+6. THE badges page SHALL display a motivational message when the learner has no badges yet.
+7. ALL badge data SHALL be derived from `Enrollment` records where `completedAt IS NOT NULL`, scoped to the authenticated learner.
+
+---
+
+### Requirement 35: Phase 5 Architecture and Quality
+
+**User Story:** As a developer, I want Phase 5 features to follow the same architectural patterns as previous phases, so that the codebase remains consistent and all existing tests continue to pass.
+
+#### Acceptance Criteria
+
+1. ALL Phase 5 data-fetching pages SHALL be implemented as Server Components that query Prisma directly.
+2. ALL Phase 5 mutations SHALL be implemented as Server Actions in `src/actions/` organized by domain.
+3. ALL Phase 5 UI SHALL use the orange color theme: buttons use `bg-orange-500 text-white hover:bg-orange-400`, accent text uses `text-orange-400` or `text-orange-500`, active nav states use `bg-orange-500/10 text-orange-600 dark:text-orange-400`.
+4. NO blue, sky, or indigo colors SHALL appear in Phase 5 UI.
+5. ALL 124 existing tests SHALL continue to pass after Phase 5 implementation.
+6. THE Platform SHALL pass `npx tsc --noEmit` with zero TypeScript errors after Phase 5 implementation.
+7. ALL Phase 5 Server Actions SHALL call `auth()` and derive `organizationId` from the session before performing any database operation.

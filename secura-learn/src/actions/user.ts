@@ -63,3 +63,54 @@ export async function updateDisplayName(firstName: string, lastName: string): Pr
     data: { firstName, lastName },
   })
 }
+
+export async function changeUserRole(
+  targetUserId: string,
+  newRole: 'ADMIN' | 'LEARNER' | 'MANAGER'
+): Promise<{ error?: string }> {
+  const { userId: clerkUserId, orgId } = await auth()
+
+  if (!clerkUserId || !orgId) {
+    return { error: 'Unauthenticated' }
+  }
+
+  // Get the current admin's DB record
+  const currentDbUser = await prisma.user.findUnique({
+    where: { clerkUserId },
+    select: { id: true, organizationId: true },
+  })
+
+  if (!currentDbUser) {
+    return { error: 'Current user not found' }
+  }
+
+  // Get the target user
+  const targetUser = await prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { id: true, organizationId: true },
+  })
+
+  if (!targetUser) {
+    return { error: 'Target user not found' }
+  }
+
+  // Verify target user belongs to the same organization
+  if (targetUser.organizationId !== currentDbUser.organizationId) {
+    return { error: 'User not found in your organization' }
+  }
+
+  // Prevent self-role-change
+  if (targetUser.id === currentDbUser.id) {
+    return { error: 'You cannot change your own role' }
+  }
+
+  await prisma.user.update({
+    where: { id: targetUserId },
+    data: { role: newRole },
+  })
+
+  const { revalidatePath } = await import('next/cache')
+  revalidatePath('/admin/users')
+
+  return {}
+}

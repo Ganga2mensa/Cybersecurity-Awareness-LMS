@@ -222,6 +222,7 @@ export async function createLesson(
     type: LessonType
     content?: string
     videoUrl?: string
+    scormPackageUrl?: string
     durationMinutes?: number
   }
 ): Promise<{ lessonId: string }> {
@@ -244,6 +245,7 @@ export async function createLesson(
       type: data.type,
       content: data.content ?? null,
       videoUrl: data.videoUrl ?? null,
+      scormPackageUrl: data.scormPackageUrl ?? null,
       durationMinutes: data.durationMinutes ?? null,
       order: count + 1,
     },
@@ -259,6 +261,7 @@ export async function updateLesson(
     title?: string
     content?: string
     videoUrl?: string
+    scormPackageUrl?: string
     durationMinutes?: number
   }
 ): Promise<void> {
@@ -282,6 +285,7 @@ export async function updateLesson(
       ...(data.title !== undefined ? { title: data.title } : {}),
       ...(data.content !== undefined ? { content: data.content } : {}),
       ...(data.videoUrl !== undefined ? { videoUrl: data.videoUrl } : {}),
+      ...(data.scormPackageUrl !== undefined ? { scormPackageUrl: data.scormPackageUrl } : {}),
       ...(data.durationMinutes !== undefined ? { durationMinutes: data.durationMinutes } : {}),
     },
   })

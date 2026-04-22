@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { CampaignStatusButton } from "@/components/campaigns/CampaignStatusButton"
+import { TemplateAssignForm } from "@/components/campaigns/TemplateAssignForm"
 import { calculateAttemptRate } from "@/lib/campaigns"
 import { CampaignStatus } from "@prisma/client"
 
@@ -43,6 +44,13 @@ export default async function CampaignDetailPage({ params }: CampaignDetailPageP
   if (!campaign || campaign.organizationId !== user.organizationId) {
     notFound()
   }
+
+  // Fetch available templates for this org
+  const templates = await prisma.phishingTemplate.findMany({
+    where: { organizationId: user.organizationId },
+    select: { id: true, name: true, subject: true },
+    orderBy: { createdAt: "desc" },
+  })
 
   const totalRecipients = campaign.attempts.length
   const openedCount = campaign.attempts.filter((a) => a.opened).length
@@ -118,6 +126,28 @@ export default async function CampaignDetailPage({ params }: CampaignDetailPageP
           </CardContent>
         </Card>
       </div>
+
+      {/* Template Assignment */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Email Template</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {campaign.templateId && (
+            <p className="text-sm text-muted-foreground mb-3">
+              Current template:{" "}
+              <span className="text-foreground font-medium">
+                {templates.find((t) => t.id === campaign.templateId)?.name ?? campaign.templateId}
+              </span>
+            </p>
+          )}
+          <TemplateAssignForm
+            campaignId={campaignId}
+            currentTemplateId={campaign.templateId}
+            templates={templates}
+          />
+        </CardContent>
+      </Card>
     </div>
   )
 }

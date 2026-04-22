@@ -7,11 +7,13 @@ const isPublicRoute = createRouteMatcher([
   '/sign-up(.*)',
   '/org-selection(.*)',
   '/api/webhooks(.*)',
+  '/api/track(.*)',
   '/unauthorized',
 ])
 
 const isAdminRoute = createRouteMatcher(['/admin(.*)'])
 const isLearnerRoute = createRouteMatcher(['/learner(.*)'])
+const isManagerRoute = createRouteMatcher(['/manager(.*)'])
 
 export default clerkMiddleware(async (auth, req) => {
   const { userId, orgId, orgRole } = await auth()
@@ -21,13 +23,15 @@ export default clerkMiddleware(async (auth, req) => {
     // Redirect authenticated users away from auth pages
     if (userId && (req.nextUrl.pathname === '/sign-in' || req.nextUrl.pathname === '/sign-up')) {
       const role = orgRole
-      const dest = role === 'org:admin' ? '/admin/dashboard' : '/learner/dashboard'
-      return NextResponse.redirect(new URL(dest, req.url))
+      if (role === 'org:admin') return NextResponse.redirect(new URL('/admin/dashboard', req.url))
+      if (role === 'org:manager') return NextResponse.redirect(new URL('/manager/dashboard', req.url))
+      return NextResponse.redirect(new URL('/learner/dashboard', req.url))
     }
     // Redirect authenticated users from landing page to their dashboard
     if (userId && req.nextUrl.pathname === '/') {
-      const dest = orgRole === 'org:admin' ? '/admin/dashboard' : '/learner/dashboard'
-      return NextResponse.redirect(new URL(dest, req.url))
+      if (orgRole === 'org:admin') return NextResponse.redirect(new URL('/admin/dashboard', req.url))
+      if (orgRole === 'org:manager') return NextResponse.redirect(new URL('/manager/dashboard', req.url))
+      return NextResponse.redirect(new URL('/learner/dashboard', req.url))
     }
     return NextResponse.next()
   }
@@ -49,6 +53,10 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   if (isLearnerRoute(req) && orgRole !== 'org:learner') {
+    return NextResponse.redirect(new URL('/unauthorized', req.url))
+  }
+
+  if (isManagerRoute(req) && orgRole !== 'org:manager') {
     return NextResponse.redirect(new URL('/unauthorized', req.url))
   }
 

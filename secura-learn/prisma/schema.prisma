@@ -41,9 +41,10 @@ model Organization {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  users     User[]
-  courses   Course[]
-  campaigns PhishingCampaign[]
+  users             User[]
+  courses           Course[]
+  campaigns         PhishingCampaign[]
+  templates         PhishingTemplate[]
 }
 
 model User {
@@ -63,6 +64,7 @@ model User {
   enrollments      Enrollment[]
   createdCampaigns PhishingCampaign[] @relation("CampaignCreatedBy")
   phishingAttempts PhishingAttempt[]
+  createdTemplates PhishingTemplate[] @relation("TemplateCreatedBy")
 
   @@index([organizationId])
 }
@@ -110,6 +112,7 @@ model Lesson {
   type            LessonType
   content         String?
   videoUrl        String?
+  scormPackageUrl String?
   durationMinutes Int?
   order           Int
   createdAt       DateTime   @default(now())
@@ -188,10 +191,12 @@ model PhishingCampaign {
   status         CampaignStatus @default(DRAFT)
   sentAt         DateTime?
   createdById    String
+  templateId     String?
   createdAt      DateTime       @default(now())
 
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdBy    User              @relation("CampaignCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  template     PhishingTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   attempts     PhishingAttempt[]
 
   @@index([organizationId])
@@ -216,4 +221,23 @@ model PhishingAttempt {
   @@unique([campaignId, userId])
   @@index([campaignId])
   @@index([userId])
+}
+
+model PhishingTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  subject        String
+  htmlBody       String   @db.Text
+  senderName     String
+  senderEmail    String
+  createdById    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User              @relation("TemplateCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  campaigns    PhishingCampaign[]
+
+  @@index([organizationId])
 }

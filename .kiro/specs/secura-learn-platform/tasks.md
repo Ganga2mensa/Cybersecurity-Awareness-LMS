@@ -859,3 +859,127 @@ Phase 4 builds the full LMS experience on top of the Phase 3 schema. It covers f
 - Client Components are limited to: forms, drag-and-drop reordering, video player, quiz interaction, and status buttons.
 - The `revalidatePath` call after each mutation ensures Server Components re-fetch fresh data.
 - Tasks marked with `*` are optional and can be skipped for a faster MVP.
+
+---
+
+## Phase 5 Tasks
+
+### Overview
+
+Phase 5 adds User Management (Admin), Analytics Dashboard (Admin), Learner Progress Dashboard, and Badges. All pages are Server Components; mutations use Server Actions. The orange color theme is enforced throughout. No schema changes are required.
+
+---
+
+- [ ] 47. Implement analytics pure functions and property tests
+  - [ ] 47.1 Create `src/lib/analytics.ts` with `calculateOrgCompletionRate` and `calculateAvgClickRate`
+    - Export `calculateOrgCompletionRate(completedEnrollments: number, totalEnrollments: number): number`
+    - Export `calculateAvgClickRate(totalClicked: number, totalAttempts: number): number`
+    - Both guard against division by zero (return 0 when denominator is 0)
+    - _Requirements: 32.7, 32.8_
+
+  - [ ]* 47.2 Write property tests for analytics functions
+    - **Property 16: `calculateOrgCompletionRate` result is always in [0, 100]**
+    - **Property 17: `calculateAvgClickRate` result is always in [0, 100]**
+    - **Validates: Requirements 32.7, 32.8**
+
+- [ ] 48. Add `changeUserRole` Server Action
+  - [ ] 48.1 Add `changeUserRole(targetUserId, newRole)` to `src/actions/user.ts`
+    - Call `auth()`, derive `organizationId`
+    - Fetch current user by `clerkUserId` to get their DB `id`
+    - Fetch target user; verify `targetUser.organizationId === organizationId`
+    - Prevent self-role-change: throw if `targetUser.id === currentDbUser.id`
+    - `prisma.user.update({ where: { id: targetUserId }, data: { role: newRole } })`
+    - `revalidatePath('/admin/users')`
+    - _Requirements: 31.3, 31.6, 31.7, 31.8, 35.2, 35.7_
+
+  - [ ]* 48.2 Write unit tests for `changeUserRole`
+    - Test updates role for valid user in same org
+    - Test rejects update for user in different org
+    - Test rejects self-role-change
+    - _Requirements: 31.3, 31.6, 31.7_
+
+- [ ] 49. Build Admin User Management pages
+  - [ ] 49.1 Create `src/components/users/RoleChangeForm.tsx` Client Component
+    - Render a `<select>` dropdown with ADMIN, LEARNER, MANAGER options
+    - On change, call `changeUserRole` Server Action with the selected role
+    - Use `bg-orange-500 text-white` styling for the submit button
+    - _Requirements: 31.3, 35.3_
+
+  - [ ] 49.2 Create `/admin/users` page (Server Component)
+    - Fetch `prisma.user.findMany({ where: { organizationId }, include: { _count: { select: { enrollments: true } } } })`
+    - Render a table with columns: Name/Email, Role badge, Enrollment count, Actions
+    - Each row links to `/admin/users/[userId]`
+    - Include `RoleChangeForm` inline for each user row
+    - _Requirements: 31.1, 31.2, 31.6_
+
+  - [ ] 49.3 Create `/admin/users/[userId]` detail page (Server Component)
+    - Fetch user by `id` verifying `organizationId` matches
+    - Fetch enrollments with course data: `prisma.enrollment.findMany({ where: { userId }, include: { course: true } })`
+    - Render user profile card (name, email, role badge)
+    - Render enrollment list with course title, progress bar, enrolled date, completed date
+    - _Requirements: 31.4, 31.5, 31.6_
+
+- [ ] 50. Build Admin Analytics Dashboard
+  - [ ] 50.1 Create `/admin/analytics` page (Server Component)
+    - Fetch all stats in parallel using `Promise.all`:
+      - `prisma.user.count({ where: { organizationId } })`
+      - `prisma.course.count({ where: { organizationId } })`
+      - Total enrollments and completed enrollments (scoped via `course.organizationId`)
+      - Per-course enrollment and completion counts
+      - Phishing: total campaigns, total attempts, total clicked
+    - Calculate `completionRate` using `calculateOrgCompletionRate`
+    - Calculate `avgClickRate` using `calculateAvgClickRate`
+    - _Requirements: 32.1, 32.2, 32.3, 32.4, 32.6, 32.7, 32.8_
+
+  - [ ] 50.2 Render analytics stat cards and tables
+    - Render 4 summary stat cards (Total Users, Total Courses, Total Enrollments, Completion Rate) using shadcn/ui `Card`
+    - Render per-course table: Course Title | Enrollments | Completions | Completion %
+    - Render phishing summary card: Total Campaigns | Total Attempts | Avg Click Rate
+    - Use orange accent colors throughout; no external chart library
+    - _Requirements: 32.2, 32.3, 32.4, 32.5, 32.9_
+
+- [ ] 51. Checkpoint — Ensure all tests pass after admin Phase 5 features
+  - Run `npm test --run` and confirm all tests pass.
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 52. Build Learner Progress Dashboard
+  - [ ] 52.1 Create `/learner/progress` page (Server Component)
+    - Fetch `dbUser` by `clerkUserId`
+    - Fetch enrollments with course and lessonProgress data
+    - Render a card per enrollment showing: course title, progress bar (`progressPercentage`), enrolled date, completed date (if set)
+    - Display "No enrollments yet" message when list is empty
+    - _Requirements: 33.1, 33.2, 33.5, 33.6_
+
+  - [ ] 52.2 Add quiz score display to progress cards
+    - For each enrollment, query completed `LessonProgress` records for QUIZ-type lessons
+    - Display quiz scores if available (derive from `LessonProgress.completed` — note: scores are not stored in DB, so display "Completed" for passed quizzes)
+    - _Requirements: 33.3_
+
+- [ ] 53. Build Learner Badges Page
+  - [ ] 53.1 Create `/learner/badges` page (Server Component)
+    - Fetch `dbUser` by `clerkUserId`
+    - Fetch `prisma.enrollment.findMany({ where: { userId: dbUser.id, completedAt: { not: null } }, include: { course: true }, orderBy: { completedAt: 'desc' } })`
+    - Render a badge card per completed enrollment showing: course name, completion date, orange badge icon
+    - Display motivational message when no badges earned yet
+    - _Requirements: 34.2, 34.3, 34.6, 34.7_
+
+- [ ] 54. Update learner dashboard with badge count
+  - [ ] 54.1 Update `/learner/dashboard` page to show badge count
+    - Add query: `prisma.enrollment.count({ where: { userId: dbUser.id, completedAt: { not: null } } })`
+    - Display badge count in a stat card on the dashboard (e.g., "🏅 X Badges Earned")
+    - Link the badge count card to `/learner/badges`
+    - _Requirements: 34.5_
+
+- [ ] 55. Final checkpoint — Phase 5 complete verification
+  - Run `npm test --run` and confirm all 124+ tests pass.
+  - Run `npx tsc --noEmit` and confirm zero TypeScript errors.
+  - Verify all Phase 5 pages render without errors.
+  - Ensure all tests pass, ask the user if questions arise.
+
+## Notes
+
+- Phase 5 derives badges from existing `Enrollment.completedAt` — no new DB table needed.
+- All analytics queries use `organizationId` scoping via relation filters (e.g., `course: { organizationId }`).
+- The `RoleChangeForm` is the only new Client Component in Phase 5.
+- Tasks marked with `*` are optional and can be skipped for a faster MVP.
+- Quiz scores are not stored in the DB schema; the progress page shows "Completed" for passed quiz lessons.

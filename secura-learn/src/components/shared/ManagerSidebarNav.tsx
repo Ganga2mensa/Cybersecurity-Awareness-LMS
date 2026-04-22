@@ -7,16 +7,13 @@ import { LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const navLinks = [
-  { label: "Dashboard", href: "/admin/dashboard" },
-  { label: "Courses", href: "/admin/courses" },
-  { label: "Users", href: "/admin/users" },
-  { label: "Phishing Campaigns", href: "/admin/campaigns" },
-  { label: "Templates", href: "/admin/templates" },
-  { label: "Analytics", href: "/admin/analytics" },
-  { label: "Profile", href: "/admin/profile" },
+  { label: "Dashboard", href: "/manager/dashboard" },
+  { label: "Team Progress", href: "/manager/team" },
+  { label: "Campaigns", href: "/manager/campaigns" },
+  { label: "Profile", href: "/manager/profile" },
 ]
 
-export function SidebarNav() {
+export function ManagerSidebarNav() {
   const pathname = usePathname()
   const router = useRouter()
   const { signOut } = useClerk()

@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { CourseForm } from "@/components/courses/CourseForm"
 import { ModuleList } from "@/components/courses/ModuleList"
 import { publishCourse, unpublishCourse, deleteCourse } from "@/actions/courses"
+import { DeleteButton } from "@/components/shared/DeleteButton"
 
 interface CourseEditPageProps {
   params: Promise<{ courseId: string }>
@@ -81,18 +82,7 @@ export default async function CourseEditPage({ params }: CourseEditPageProps) {
               redirect("/admin/courses")
             }}
           >
-            <Button
-              type="submit"
-              variant="destructive"
-              size="sm"
-              onClick={(e) => {
-                if (!confirm("Delete this course and all its content?")) {
-                  e.preventDefault()
-                }
-              }}
-            >
-              Delete
-            </Button>
+            <DeleteButton confirmMessage="Delete this course and all its content?" />
           </form>
         </div>
       </div>

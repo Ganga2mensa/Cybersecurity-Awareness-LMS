@@ -40,17 +40,56 @@ export default async function LearnerDashboardPage() {
     select: { id: true },
   })
 
-  const enrollments = dbUser
-    ? await prisma.enrollment.findMany({
+  let enrollments: Array<{
+    id: string
+    userId: string
+    courseId: string
+    enrolledAt: Date
+    completedAt: Date | null
+    progressPercentage: number
+    course: { id: string; title: string; description: string | null }
+  }> = []
+  let badgeCount = 0
+
+  if (dbUser) {
+    const results = await Promise.all([
+      prisma.enrollment.findMany({
         where: { userId: dbUser.id },
         include: { course: { select: { id: true, title: true, description: true } } },
         orderBy: { enrolledAt: "desc" },
-      })
-    : []
+      }),
+      prisma.enrollment.count({
+        where: { userId: dbUser.id, completedAt: { not: null } },
+      }),
+    ])
+    enrollments = results[0]
+    badgeCount = results[1]
+  }
 
   return (
     <div className="max-w-4xl mx-auto">
       <UserGreeting userName={userName} orgName={orgName} />
+
+      {/* Badge count stat */}
+      {badgeCount > 0 && (
+        <div className="mt-6">
+          <Link href="/learner/badges">
+            <Card className="hover:ring-2 hover:ring-orange-500/30 transition-all cursor-pointer">
+              <CardContent className="py-4 flex items-center gap-4">
+                <span className="text-3xl">🏅</span>
+                <div>
+                  <p className="font-semibold text-foreground">
+                    {badgeCount} Badge{badgeCount !== 1 ? "s" : ""} Earned
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    View your completed course badges →
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        </div>
+      )}
 
       <div className="mt-6 space-y-4">
         <div className="flex items-center justify-between">

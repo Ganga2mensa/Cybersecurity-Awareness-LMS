@@ -1487,3 +1487,261 @@ src/__tests__/
     ├── learner-catalog.test.tsx   # Page rendering tests
     └── lesson-viewer.test.tsx     # Page rendering tests
 ```
+
+
+---
+
+## Phase 5 Design
+
+### Overview
+
+Phase 5 adds four feature groups on top of the existing Phase 4 foundation:
+
+1. **User Management (Admin)** — List all org users, change roles, view individual user detail with enrollments.
+2. **Analytics Dashboard (Admin)** — Org-wide stats: users, courses, enrollments, completion rate, per-course table, phishing summary.
+3. **Learner Progress Dashboard** — Dedicated `/learner/progress` page with all enrollments, progress bars, quiz scores.
+4. **Badges** — Derive badges from completed enrollments; `/learner/badges` page; badge count on learner dashboard.
+
+All features follow the established patterns: Server Components for data fetching, Server Actions for mutations, Client Components only where interactivity is required, strict multi-tenant scoping via `organizationId`, and the orange color theme throughout.
+
+---
+
+### Architecture
+
+```
+Browser
+  │
+  ├─ /admin/users                    Server Component (user list)
+  ├─ /admin/users/[userId]           Server Component (user detail)
+  ├─ /admin/analytics                Server Component (org stats)
+  ├─ /learner/progress               Server Component (progress dashboard)
+  └─ /learner/badges                 Server Component (badges gallery)
+```
+
+---
+
+### Pure Functions (Phase 5)
+
+#### `calculateOrgCompletionRate(completedEnrollments: number, totalEnrollments: number): number`
+
+```typescript
+// src/lib/analytics.ts
+export function calculateOrgCompletionRate(
+  completedEnrollments: number,
+  totalEnrollments: number
+): number {
+  if (totalEnrollments === 0) return 0
+  return Math.floor((completedEnrollments / totalEnrollments) * 100)
+}
+```
+
+**Invariants:**
+- Result is always an integer in [0, 100].
+- `totalEnrollments = 0` → 0 (guard against division by zero).
+- `completedEnrollments = totalEnrollments` → 100.
+
+#### `calculateAvgClickRate(totalClicked: number, totalAttempts: number): number`
+
+```typescript
+// src/lib/analytics.ts
+export function calculateAvgClickRate(
+  totalClicked: number,
+  totalAttempts: number
+): number {
+  if (totalAttempts === 0) return 0
+  return Math.floor((totalClicked / totalAttempts) * 100)
+}
+```
+
+**Invariants:**
+- Result is always an integer in [0, 100].
+- `totalAttempts = 0` → 0.
+
+---
+
+### Server Actions (Phase 5)
+
+#### `changeUserRole` in `src/actions/user.ts`
+
+```typescript
+export async function changeUserRole(
+  targetUserId: string,
+  newRole: Role
+): Promise<void>
+```
+
+- Calls `auth()`, derives `organizationId`.
+- Fetches the target user; verifies `user.organizationId === organizationId`.
+- Prevents self-role-change: if `targetUserId === currentUser.id`, throws an error.
+- `prisma.user.update({ where: { id: targetUserId }, data: { role: newRole } })`.
+- `revalidatePath('/admin/users')`.
+
+---
+
+### Component Interfaces
+
+#### Server Components
+
+```typescript
+// /admin/users — lists all users in org
+// Fetches: prisma.user.findMany({ where: { organizationId }, include: { _count: { select: { enrollments: true } } } })
+// Renders: UserTable with role change controls
+
+// /admin/users/[userId] — user detail
+// Fetches: user + enrollments with course data
+// Renders: UserProfile + EnrollmentList
+
+// /admin/analytics — org-wide stats
+// Fetches: user count, course count, enrollment counts, phishing stats
+// Renders: StatCards + CourseTable + PhishingStats
+
+// /learner/progress — learner's enrolled courses
+// Fetches: enrollments with course + lessonProgress + quiz scores
+// Renders: ProgressCard per enrollment
+
+// /learner/badges — earned badges
+// Fetches: enrollments where completedAt IS NOT NULL
+// Renders: BadgeCard per completed enrollment
+```
+
+#### Client Components
+
+```typescript
+// src/components/users/RoleChangeForm.tsx
+// 'use client' — select dropdown for role, calls changeUserRole Server Action
+```
+
+---
+
+### Folder Structure (Phase 5 additions)
+
+```
+secura-learn/
+├── src/
+│   ├── actions/
+│   │   └── user.ts                    # UPDATED — add changeUserRole
+│   ├── lib/
+│   │   └── analytics.ts               # NEW — calculateOrgCompletionRate, calculateAvgClickRate
+│   ├── app/
+│   │   ├── (admin)/
+│   │   │   └── admin/
+│   │   │       ├── users/
+│   │   │       │   ├── page.tsx                    # NEW — user list
+│   │   │       │   └── [userId]/
+│   │   │       │       └── page.tsx                # NEW — user detail
+│   │   │       └── analytics/
+│   │   │           └── page.tsx                    # NEW — analytics dashboard
+│   │   └── (learner)/
+│   │       └── learner/
+│   │           ├── progress/
+│   │           │   └── page.tsx                    # NEW — progress dashboard
+│   │           └── badges/
+│   │               └── page.tsx                    # NEW — badges gallery
+│   └── components/
+│       └── users/
+│           └── RoleChangeForm.tsx                  # NEW — role change (Client)
+```
+
+---
+
+### Data Queries
+
+#### Analytics Page
+
+```typescript
+// All scoped to organizationId
+const [userCount, courseCount, enrollmentStats, phishingStats] = await Promise.all([
+  prisma.user.count({ where: { organizationId } }),
+  prisma.course.count({ where: { organizationId } }),
+  prisma.enrollment.aggregate({
+    where: { course: { organizationId } },
+    _count: { id: true },
+  }),
+  // completed enrollments
+  prisma.enrollment.count({
+    where: { course: { organizationId }, completedAt: { not: null } },
+  }),
+])
+
+// Per-course stats
+const courses = await prisma.course.findMany({
+  where: { organizationId },
+  include: {
+    _count: { select: { enrollments: true } },
+    enrollments: { where: { completedAt: { not: null } }, select: { id: true } },
+  },
+})
+
+// Phishing stats
+const campaigns = await prisma.phishingCampaign.findMany({
+  where: { organizationId },
+  include: { _count: { select: { attempts: true } } },
+})
+const totalAttempts = await prisma.phishingAttempt.count({
+  where: { campaign: { organizationId } },
+})
+const totalClicked = await prisma.phishingAttempt.count({
+  where: { campaign: { organizationId }, clicked: true },
+})
+```
+
+#### Learner Progress Page
+
+```typescript
+const enrollments = await prisma.enrollment.findMany({
+  where: { userId: dbUser.id },
+  include: {
+    course: { select: { id: true, title: true } },
+    lessonProgress: {
+      where: { completed: true },
+      include: { lesson: { select: { id: true, title: true, type: true } } },
+    },
+  },
+  orderBy: { enrolledAt: 'desc' },
+})
+```
+
+#### Badges Page
+
+```typescript
+const completedEnrollments = await prisma.enrollment.findMany({
+  where: { userId: dbUser.id, completedAt: { not: null } },
+  include: { course: { select: { id: true, title: true } } },
+  orderBy: { completedAt: 'desc' },
+})
+```
+
+---
+
+### Phase 5 Correctness Properties
+
+#### Property 16: Org completion rate is always in [0, 100]
+
+*For any* non-negative integers `completedEnrollments` and `totalEnrollments` where `completedEnrollments ≤ totalEnrollments`, `calculateOrgCompletionRate(completedEnrollments, totalEnrollments)` SHALL return an integer in the range [0, 100].
+
+**Validates: Requirements 32.7**
+
+#### Property 17: Avg click rate is always in [0, 100]
+
+*For any* non-negative integers `totalClicked` and `totalAttempts` where `totalClicked ≤ totalAttempts`, `calculateAvgClickRate(totalClicked, totalAttempts)` SHALL return an integer in the range [0, 100].
+
+**Validates: Requirements 32.8**
+
+---
+
+### Phase 5 Testing Strategy
+
+#### Property-Based Tests
+
+| Property | Function | Generator |
+|---|---|---|
+| P16: Org completion rate in [0,100] | `calculateOrgCompletionRate` | `fc.nat()` for both args, filter `completed ≤ total` |
+| P17: Avg click rate in [0,100] | `calculateAvgClickRate` | `fc.nat()` for both args, filter `clicked ≤ total` |
+
+#### Unit Tests
+
+- `changeUserRole`: updates role for valid user in same org.
+- `changeUserRole`: rejects update for user in different org.
+- `changeUserRole`: rejects self-role-change.
+- Analytics page: all counts are scoped to org.
+- Badges page: only shows enrollments with `completedAt IS NOT NULL`.
