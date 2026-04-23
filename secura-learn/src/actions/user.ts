@@ -1,6 +1,6 @@
 'use server'
 
-import { auth, currentUser } from '@clerk/nextjs/server'
+import { auth, currentUser, clerkClient } from '@clerk/nextjs/server'
 import { prisma } from '@/lib/prisma'
 
 export async function syncUserToDatabase(): Promise<void> {
@@ -16,7 +16,7 @@ export async function syncUserToDatabase(): Promise<void> {
   const firstName = clerkUser?.firstName || null
   const lastName = clerkUser?.lastName || null
 
-  const prismaRole = orgRole === 'org:admin' ? 'ADMIN' : 'LEARNER'
+  const prismaRole = orgRole === 'org:admin' ? 'ADMIN' : orgRole === 'org:manager' ? 'MANAGER' : 'LEARNER'
 
   let organizationId: string | undefined
 
@@ -29,6 +29,25 @@ export async function syncUserToDatabase(): Promise<void> {
       create: { clerkOrgId: orgId, name: orgId, slug },
     })
     organizationId = org.id
+  }
+
+  // Try to find existing user by clerkUserId first, then fall back to email
+  // This handles the case where a user record exists with the email but a different clerkUserId
+  const existingByEmail = await prisma.user.findUnique({ where: { email } })
+
+  if (existingByEmail && existingByEmail.clerkUserId !== userId) {
+    // Update the existing record to use the correct clerkUserId
+    await prisma.user.update({
+      where: { email },
+      data: {
+        clerkUserId: userId,
+        firstName,
+        lastName,
+        role: prismaRole,
+        ...(organizationId ? { organizationId } : {}),
+      },
+    })
+    return
   }
 
   await prisma.user.upsert({
@@ -113,4 +132,33 @@ export async function changeUserRole(
   revalidatePath('/admin/users')
 
   return {}
+}
+
+export async function inviteUser(data: {
+  emailAddress: string
+  role: 'org:learner' | 'org:manager' | 'org:admin'
+  firstName?: string
+  lastName?: string
+}): Promise<{ error?: string }> {
+  const { userId, orgId } = await auth()
+
+  if (!userId || !orgId) {
+    return { error: 'Unauthenticated' }
+  }
+
+  try {
+    const client = await clerkClient()
+    await client.organizations.createOrganizationInvitation({
+      organizationId: orgId,
+      emailAddress: data.emailAddress,
+      role: data.role,
+      inviterUserId: userId,
+      redirectUrl: `${process.env.NEXT_PUBLIC_APP_URL}/sign-up`,
+    })
+    return {}
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : 'Failed to send invitation'
+    return { error: message }
+  }
 }

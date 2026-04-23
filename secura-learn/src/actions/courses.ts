@@ -4,6 +4,7 @@ import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { LessonType } from '@prisma/client'
+import { calculateProgressPercentage } from '@/lib/progress'
 
 // ─── Helper: get authenticated user with organizationId ──────────────────────
 
@@ -213,7 +214,38 @@ export async function reorderModules(
   revalidatePath(`/admin/courses/${courseId}`)
 }
 
-// ─── Lesson Actions ───────────────────────────────────────────────────────────
+// ─── Helper: recalculate progress for all enrollments in a course ─────────────
+
+async function recalculateEnrollmentsForCourse(courseId: string): Promise<void> {
+  // Get total lesson count for the course
+  const totalLessons = await prisma.lesson.count({
+    where: { module: { courseId } },
+  })
+
+  // Get all enrollments for this course
+  const enrollments = await prisma.enrollment.findMany({
+    where: { courseId },
+    select: { id: true },
+  })
+
+  // Recalculate each enrollment
+  await Promise.all(
+    enrollments.map(async (enrollment) => {
+      const completedCount = await prisma.lessonProgress.count({
+        where: { enrollmentId: enrollment.id, completed: true },
+      })
+      const newProgress = calculateProgressPercentage(completedCount, totalLessons)
+      await prisma.enrollment.update({
+        where: { id: enrollment.id },
+        data: {
+          progressPercentage: newProgress,
+          // Only clear completedAt if progress dropped below 100
+          ...(newProgress < 100 ? { completedAt: null } : {}),
+        },
+      })
+    })
+  )
+}
 
 export async function createLesson(
   moduleId: string,
@@ -252,6 +284,8 @@ export async function createLesson(
   })
 
   revalidatePath(`/admin/courses/${module.courseId}`)
+  // Recalculate progress for all enrollments since total lesson count changed
+  await recalculateEnrollmentsForCourse(module.courseId)
   return { lessonId: lesson.id }
 }
 
@@ -310,6 +344,8 @@ export async function deleteLesson(lessonId: string): Promise<void> {
 
   await prisma.lesson.delete({ where: { id: lessonId } })
 
+  // Recalculate progress for all enrollments since total lesson count changed
+  await recalculateEnrollmentsForCourse(lesson.module.courseId)
   revalidatePath(`/admin/courses/${lesson.module.courseId}`)
 }
 

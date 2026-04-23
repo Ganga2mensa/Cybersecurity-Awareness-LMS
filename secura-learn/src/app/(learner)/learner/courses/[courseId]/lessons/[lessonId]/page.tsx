@@ -7,6 +7,7 @@ import { VideoPlayer } from "@/components/lessons/VideoPlayer"
 import { MarkdownRenderer } from "@/components/lessons/MarkdownRenderer"
 import { QuizForm } from "@/components/lessons/QuizForm"
 import { ScormViewer } from "@/components/lessons/ScormViewer"
+import { CompleteButton } from "@/components/lessons/CompleteButton"
 
 interface LessonViewerPageProps {
   params: Promise<{ courseId: string; lessonId: string }>
@@ -141,15 +142,24 @@ export default async function LessonViewerPage({ params }: LessonViewerPageProps
         )}
 
         {lesson.type === "VIDEO" && !lesson.videoUrl && (
-          <p className="text-muted-foreground">No video URL provided for this lesson.</p>
+          <div className="space-y-4">
+            <p className="text-muted-foreground">No video URL provided for this lesson.</p>
+            <CompleteButton enrollmentId={enrollment.id} lessonId={lessonId} isCompleted={isCompleted} />
+          </div>
         )}
 
         {(lesson.type === "TEXT" || lesson.type === "READING") && !lesson.content && (
-          <p className="text-muted-foreground">No content provided for this lesson.</p>
+          <div className="space-y-4">
+            <p className="text-muted-foreground">No content provided for this lesson.</p>
+            <CompleteButton enrollmentId={enrollment.id} lessonId={lessonId} isCompleted={isCompleted} />
+          </div>
         )}
 
         {lesson.type === "QUIZ" && !lesson.quiz && (
-          <p className="text-muted-foreground">No quiz questions available for this lesson.</p>
+          <div className="space-y-4">
+            <p className="text-muted-foreground">No quiz questions available for this lesson.</p>
+            <CompleteButton enrollmentId={enrollment.id} lessonId={lessonId} isCompleted={isCompleted} />
+          </div>
         )}
 
         {lesson.type === "SCORM" && lesson.scormPackageUrl && (
@@ -162,7 +172,10 @@ export default async function LessonViewerPage({ params }: LessonViewerPageProps
         )}
 
         {lesson.type === "SCORM" && !lesson.scormPackageUrl && (
-          <p className="text-muted-foreground">No SCORM package URL provided for this lesson.</p>
+          <div className="space-y-4">
+            <p className="text-muted-foreground">No SCORM package URL provided for this lesson.</p>
+            <CompleteButton enrollmentId={enrollment.id} lessonId={lessonId} isCompleted={isCompleted} />
+          </div>
         )}
       </div>
 

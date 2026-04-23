@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 const isPublicRoute = createRouteMatcher([
   '/',
+  '/get-started',
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/org-selection(.*)',
@@ -22,16 +23,19 @@ export default clerkMiddleware(async (auth, req) => {
   if (isPublicRoute(req)) {
     // Redirect authenticated users away from auth pages
     if (userId && (req.nextUrl.pathname === '/sign-in' || req.nextUrl.pathname === '/sign-up')) {
-      const role = orgRole
-      if (role === 'org:admin') return NextResponse.redirect(new URL('/admin/dashboard', req.url))
-      if (role === 'org:manager') return NextResponse.redirect(new URL('/manager/dashboard', req.url))
-      return NextResponse.redirect(new URL('/learner/dashboard', req.url))
+      if (orgRole === 'org:admin') return NextResponse.redirect(new URL('/admin/dashboard', req.url))
+      if (orgRole === 'org:manager') return NextResponse.redirect(new URL('/manager/dashboard', req.url))
+      if (orgRole === 'org:learner') return NextResponse.redirect(new URL('/learner/dashboard', req.url))
+      // Unknown role — let them stay on sign-in/sign-up to resolve org membership
+      return NextResponse.next()
     }
     // Redirect authenticated users from landing page to their dashboard
     if (userId && req.nextUrl.pathname === '/') {
       if (orgRole === 'org:admin') return NextResponse.redirect(new URL('/admin/dashboard', req.url))
       if (orgRole === 'org:manager') return NextResponse.redirect(new URL('/manager/dashboard', req.url))
-      return NextResponse.redirect(new URL('/learner/dashboard', req.url))
+      if (orgRole === 'org:learner') return NextResponse.redirect(new URL('/learner/dashboard', req.url))
+      // Authenticated but no recognised role — show landing page
+      return NextResponse.next()
     }
     return NextResponse.next()
   }

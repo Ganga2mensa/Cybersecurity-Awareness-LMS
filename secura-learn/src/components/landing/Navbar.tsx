@@ -14,6 +14,12 @@ export function Navbar() {
       <div className="hidden md:flex items-center gap-3">
         <ThemeToggle />
         <Link
+          href="/get-started"
+          className="text-sm font-medium text-slate-300 hover:text-white transition-colors"
+        >
+          For Organizations
+        </Link>
+        <Link
           href="/sign-in"
           className="text-sm font-medium text-slate-300 hover:text-white transition-colors"
         >

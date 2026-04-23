@@ -39,11 +39,19 @@ export default async function AdminUsersPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">User Management</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Manage all users in your organization
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">User Management</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Manage all users in your organization
+          </p>
+        </div>
+        <Link
+          href="/admin/users/invite"
+          className="inline-flex items-center justify-center rounded-lg px-4 h-9 text-sm font-semibold bg-orange-500 text-white hover:bg-orange-400 transition-colors shrink-0"
+        >
+          Invite Member
+        </Link>
       </div>
 
       <Card>

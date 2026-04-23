@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { ChevronUp, ChevronDown, Trash2, Pencil, Check, X } from "lucide-react"
+import { ChevronUp, ChevronDown, Trash2, Pencil, Check, X, FileEdit } from "lucide-react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -179,12 +180,19 @@ export function LessonList({ moduleId, courseId, initialLessons }: LessonListPro
 
           {editingId !== lesson.id && (
             <div className="flex items-center gap-1 shrink-0">
+              <Link
+                href={`/admin/courses/${courseId}/lessons/${lesson.id}/edit`}
+                title="Edit content"
+                className="inline-flex items-center justify-center rounded size-6 text-muted-foreground hover:text-orange-500 hover:bg-muted transition-colors"
+              >
+                <FileEdit className="size-3" />
+              </Link>
               <Button
                 variant="ghost"
                 size="icon-xs"
                 onClick={() => startEdit(lesson)}
                 disabled={isPending}
-                aria-label="Edit lesson"
+                aria-label="Rename lesson"
               >
                 <Pencil className="size-3" />
               </Button>

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { CampaignStatusButton } from "@/components/campaigns/CampaignStatusButton"
 import { TemplateAssignForm } from "@/components/campaigns/TemplateAssignForm"
+import { SendCampaignButton } from "@/components/campaigns/SendCampaignButton"
 import { calculateAttemptRate } from "@/lib/campaigns"
 import { CampaignStatus } from "@prisma/client"
 
@@ -38,6 +39,7 @@ export default async function CampaignDetailPage({ params }: CampaignDetailPageP
       attempts: {
         select: { opened: true, clicked: true, reported: true },
       },
+      template: { select: { id: true, name: true } },
     },
   })
 
@@ -127,6 +129,23 @@ export default async function CampaignDetailPage({ params }: CampaignDetailPageP
         </Card>
       </div>
 
+      {/* Send Emails */}
+      {campaign.status !== "DRAFT" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Send Phishing Emails</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SendCampaignButton
+              campaignId={campaignId}
+              recipientCount={totalRecipients}
+              hasTemplate={!!campaign.templateId}
+              sentAt={campaign.sentAt}
+            />
+          </CardContent>
+        </Card>
+      )}
+
       {/* Template Assignment */}
       <Card>
         <CardHeader>
@@ -146,6 +165,37 @@ export default async function CampaignDetailPage({ params }: CampaignDetailPageP
             currentTemplateId={campaign.templateId}
             templates={templates}
           />
+        </CardContent>
+      </Card>
+
+      {/* Recipients */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">
+              Recipients ({totalRecipients})
+            </CardTitle>
+            <Link
+              href={`/admin/campaigns/${campaignId}/recipients`}
+              className="inline-flex items-center justify-center rounded-lg px-4 h-8 text-sm font-semibold bg-orange-500 text-white hover:bg-orange-400 transition-colors"
+            >
+              Manage Recipients
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {totalRecipients === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No recipients added yet.{" "}
+              <Link href={`/admin/campaigns/${campaignId}/recipients`} className="text-orange-500 hover:underline">
+                Add recipients →
+              </Link>
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {totalRecipients} user{totalRecipients !== 1 ? "s" : ""} will receive this phishing simulation.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

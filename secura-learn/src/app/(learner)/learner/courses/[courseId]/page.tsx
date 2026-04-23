@@ -70,6 +70,11 @@ export default async function LearnerCourseDetailPage({ params }: CourseDetailPa
 
   const totalLessons = course.modules.reduce((sum, mod) => sum + mod.lessons.length, 0)
 
+  // Calculate live progress from actual completed lessons — never use stale DB value
+  const liveProgress = totalLessons > 0
+    ? Math.floor((completedLessonIds.size / totalLessons) * 100)
+    : 0
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -94,15 +99,18 @@ export default async function LearnerCourseDetailPage({ params }: CourseDetailPa
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Your progress</span>
-            <span className="font-medium">{enrollment.progressPercentage}%</span>
+            <span className="font-medium text-orange-500">{liveProgress}%</span>
           </div>
-          <Progress value={enrollment.progressPercentage} />
+          <Progress value={liveProgress} />
+          <p className="text-xs text-muted-foreground">
+            {completedLessonIds.size} of {totalLessons} lessons completed
+          </p>
           {firstIncompleteLessonId ? (
             <Link href={`/learner/courses/${courseId}/lessons/${firstIncompleteLessonId}`} className={cn(buttonVariants())}>
               Continue Learning
             </Link>
           ) : (
-            <Badge variant="success">Course Completed!</Badge>
+            <Badge variant="success">Course Completed! 🎉</Badge>
           )}
         </div>
       ) : (
@@ -119,41 +127,56 @@ export default async function LearnerCourseDetailPage({ params }: CourseDetailPa
 
       <div className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground">Course Content</h2>
-        {course.modules.map((mod) => (
-          <Card key={mod.id}>
-            <CardHeader>
-              <CardTitle className="text-base">{mod.title}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-2">
-                {mod.lessons.map((lesson) => {
-                  const isCompleted = completedLessonIds.has(lesson.id)
-                  return (
-                    <li key={lesson.id} className="flex items-center gap-3">
-                      <span className={`text-sm ${isCompleted ? "text-muted-foreground line-through" : "text-foreground"}`}>
-                        {lesson.title}
-                      </span>
-                      <Badge variant="outline" className="text-xs ml-auto">
-                        {lesson.type}
-                      </Badge>
-                      {isCompleted && (
-                        <Badge variant="success" className="text-xs">Done</Badge>
-                      )}
-                      {enrollment && (
-                        <Link
-                          href={`/learner/courses/${courseId}/lessons/${lesson.id}`}
-                          className="text-xs text-primary hover:underline"
-                        >
-                          {isCompleted ? "Review" : "Start"}
-                        </Link>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            </CardContent>
-          </Card>
-        ))}
+        {course.modules.map((mod) => {
+          const moduleLessonIds = mod.lessons.map((l) => l.id)
+          const completedInModule = moduleLessonIds.filter((id) => completedLessonIds.has(id)).length
+          const moduleProgress = moduleLessonIds.length > 0
+            ? Math.floor((completedInModule / moduleLessonIds.length) * 100)
+            : 0
+
+          return (
+            <Card key={mod.id}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between gap-4">
+                  <CardTitle className="text-base">{mod.title}</CardTitle>
+                  {enrollment && (
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {completedInModule}/{moduleLessonIds.length} lessons
+                    </span>
+                  )}
+                </div>
+                {enrollment && moduleLessonIds.length > 0 && (
+                  <Progress value={moduleProgress} className="h-1.5 mt-2" />
+                )}
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2">
+                  {mod.lessons.map((lesson) => {
+                    const isCompleted = completedLessonIds.has(lesson.id)
+                    return (
+                      <li key={lesson.id} className="flex items-center gap-3">
+                        <span className={`text-sm ${isCompleted ? "text-muted-foreground line-through" : "text-foreground"}`}>
+                          {isCompleted ? "✓ " : ""}{lesson.title}
+                        </span>
+                        <Badge variant="outline" className="text-xs ml-auto shrink-0">
+                          {lesson.type}
+                        </Badge>
+                        {enrollment && (
+                          <Link
+                            href={`/learner/courses/${courseId}/lessons/${lesson.id}`}
+                            className="text-xs text-orange-500 hover:text-orange-400 hover:underline shrink-0"
+                          >
+                            {isCompleted ? "Review" : "Start"}
+                          </Link>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </CardContent>
+            </Card>
+          )
+        })}
       </div>
     </div>
   )

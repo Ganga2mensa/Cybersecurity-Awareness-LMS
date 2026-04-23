@@ -37,8 +37,13 @@ export default async function LearnerDashboardPage() {
   // Fetch enrollments with course data
   const dbUser = await prisma.user.findUnique({
     where: { clerkUserId },
-    select: { id: true },
+    select: { id: true, firstName: true },
   })
+
+  // Redirect to onboarding if the user hasn't set their name yet
+  if (dbUser && dbUser.firstName === null) {
+    redirect("/learner/onboarding")
+  }
 
   let enrollments: Array<{
     id: string
@@ -47,7 +52,13 @@ export default async function LearnerDashboardPage() {
     enrolledAt: Date
     completedAt: Date | null
     progressPercentage: number
-    course: { id: string; title: string; description: string | null }
+    course: {
+      id: string
+      title: string
+      description: string | null
+      modules: { lessons: { id: string }[] }[]
+    }
+    lessonProgress: { lessonId: string }[]
   }> = []
   let badgeCount = 0
 
@@ -55,7 +66,22 @@ export default async function LearnerDashboardPage() {
     const results = await Promise.all([
       prisma.enrollment.findMany({
         where: { userId: dbUser.id },
-        include: { course: { select: { id: true, title: true, description: true } } },
+        include: {
+          course: {
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              modules: {
+                select: { lessons: { select: { id: true } } },
+              },
+            },
+          },
+          lessonProgress: {
+            where: { completed: true },
+            select: { lessonId: true },
+          },
+        },
         orderBy: { enrolledAt: "desc" },
       }),
       prisma.enrollment.count({
@@ -110,30 +136,43 @@ export default async function LearnerDashboardPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {enrollments.map((enrollment) => (
-              <Link key={enrollment.id} href={`/learner/courses/${enrollment.courseId}`}>
-                <Card className="hover:ring-2 hover:ring-primary/30 transition-all cursor-pointer h-full">
-                  <CardHeader>
-                    <CardTitle className="text-base">{enrollment.course.title}</CardTitle>
-                    {enrollment.course.description && (
-                      <p className="text-xs text-muted-foreground line-clamp-2">
-                        {enrollment.course.description}
+            {enrollments.map((enrollment) => {
+              const totalLessons = enrollment.course.modules.reduce(
+                (sum, mod) => sum + mod.lessons.length, 0
+              )
+              const completedCount = enrollment.lessonProgress.length
+              const liveProgress = totalLessons > 0
+                ? Math.floor((completedCount / totalLessons) * 100)
+                : 0
+
+              return (
+                <Link key={enrollment.id} href={`/learner/courses/${enrollment.courseId}`}>
+                  <Card className="hover:ring-2 hover:ring-orange-500/30 transition-all cursor-pointer h-full">
+                    <CardHeader>
+                      <CardTitle className="text-base">{enrollment.course.title}</CardTitle>
+                      {enrollment.course.description && (
+                        <p className="text-xs text-muted-foreground line-clamp-2">
+                          {enrollment.course.description}
+                        </p>
+                      )}
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">Progress</span>
+                        <span className="font-medium text-orange-500">{liveProgress}%</span>
+                      </div>
+                      <Progress value={liveProgress} />
+                      <p className="text-xs text-muted-foreground">
+                        {completedCount} of {totalLessons} lessons
                       </p>
-                    )}
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">Progress</span>
-                      <span className="font-medium">{enrollment.progressPercentage}%</span>
-                    </div>
-                    <Progress value={enrollment.progressPercentage} />
-                    {enrollment.completedAt && (
-                      <Badge variant="success" className="text-xs">Completed</Badge>
-                    )}
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
+                      {liveProgress === 100 && (
+                        <Badge variant="success" className="text-xs">Completed 🎉</Badge>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Link>
+              )
+            })}
           </div>
         )}
       </div>
