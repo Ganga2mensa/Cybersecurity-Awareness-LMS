@@ -20,6 +20,7 @@ export function OnboardingForm() {
 
     try {
       await updateDisplayName(firstName.trim(), lastName.trim())
+      router.refresh()
       router.push("/learner/dashboard")
     } catch (err: unknown) {
       setLoading(false)

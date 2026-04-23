@@ -41,8 +41,8 @@ export async function syncUserToDatabase(): Promise<void> {
       where: { email },
       data: {
         clerkUserId: userId,
-        firstName,
-        lastName,
+        ...(firstName ? { firstName } : {}),
+        ...(lastName ? { lastName } : {}),
         role: prismaRole,
         ...(organizationId ? { organizationId } : {}),
       },
@@ -54,8 +54,9 @@ export async function syncUserToDatabase(): Promise<void> {
     where: { clerkUserId: userId },
     update: {
       email,
-      firstName,
-      lastName,
+      // Only update names from Clerk if not already set in DB (preserve onboarding values)
+      ...(firstName ? { firstName } : {}),
+      ...(lastName ? { lastName } : {}),
       role: prismaRole,
       ...(organizationId ? { organizationId } : {}),
     },
