@@ -21,12 +21,20 @@ export async function syncUserToDatabase(): Promise<void> {
   let organizationId: string | undefined
 
   if (orgId) {
-    // Generate a slug from the orgId for now - in a real app this would be more sophisticated
-    const slug = orgId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || orgId
+    // Fetch the real org name from Clerk
+    let orgName = orgId // fallback to ID if fetch fails
+    try {
+      const client = await clerkClient()
+      const clerkOrg = await client.organizations.getOrganization({ organizationId: orgId })
+      orgName = clerkOrg.name
+    } catch {
+      // keep fallback
+    }
+    const slug = orgName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || orgId
     const org = await prisma.organization.upsert({
       where: { clerkOrgId: orgId },
-      update: {},
-      create: { clerkOrgId: orgId, name: orgId, slug },
+      update: { name: orgName }, // always keep name in sync with Clerk
+      create: { clerkOrgId: orgId, name: orgName, slug },
     })
     organizationId = org.id
   }
