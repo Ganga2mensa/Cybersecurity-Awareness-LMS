@@ -9,8 +9,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "SecuraLearn",
-  description: "Security Awareness Training Platform",
+  title: "KomorebiSec",
+  description: "Cybersecurity Learning Management System",
 };
 
 export default function RootLayout({

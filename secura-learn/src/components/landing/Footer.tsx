@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ShieldCheck } from "lucide-react"
+import { KomorebiLogo } from "@/components/shared/KomorebiLogo"
 
 export function Footer() {
   return (
@@ -8,14 +8,11 @@ export function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-10">
           {/* Brand */}
           <div className="md:col-span-1">
-            <div className="flex items-center gap-2 mb-3">
-              <ShieldCheck className="size-5 text-orange-500" />
-              <span className="text-white font-bold text-lg">
-                Secura<span className="text-orange-500">Learn</span>
-              </span>
+            <div className="mb-3">
+              <KomorebiLogo iconSize={26} />
             </div>
             <p className="text-slate-400 text-sm leading-relaxed">
-              Security awareness training that actually works. Protect your organization from human-element threats.
+              Cybersecurity Learning Management System. Protect your organization from human-element threats.
             </p>
           </div>
 
@@ -88,7 +85,7 @@ export function Footer() {
 
         <div className="border-t border-white/10 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-slate-500 text-sm">
-            &copy; {new Date().getFullYear()} SecuraLearn. All rights reserved.
+            &copy; {new Date().getFullYear()} KomorebiSec. All rights reserved.
           </p>
           <p className="text-slate-600 text-xs">
             Built for security-conscious organizations worldwide.

@@ -2,8 +2,9 @@
 
 import Link from "next/link"
 import { useState, useRef } from "react"
-import { ShieldCheck, ChevronDown, X, UserCircle } from "lucide-react"
+import { ChevronDown, X, UserCircle, ShieldCheck } from "lucide-react"
 import { ThemeToggle } from "@/components/shared/ThemeToggle"
+import { KomorebiLogo } from "@/components/shared/KomorebiLogo"
 
 // ─── Mega menu data ───────────────────────────────────────────────────────────
 
@@ -138,11 +139,8 @@ export function Navbar() {
       <nav className="bg-[#0F172A] border-b border-white/10">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-6">
           {/* Brand */}
-          <Link href="/" className="flex items-center gap-2 shrink-0" onClick={() => setActiveMenu(null)}>
-            <ShieldCheck className="size-6 text-orange-500" />
-            <span className="text-xl font-bold text-white tracking-tight">
-              Secura<span className="text-orange-500">Learn</span>
-            </span>
+          <Link href="/" className="flex items-center shrink-0" onClick={() => setActiveMenu(null)}>
+            <KomorebiLogo iconSize={28} />
           </Link>
 
           {/* Nav items */}
@@ -180,10 +178,10 @@ export function Navbar() {
               Sign In
             </Link>
             <Link
-              href="/contact"
+              href="/demo"
               className="inline-flex items-center justify-center rounded-lg px-4 h-8 text-sm font-semibold bg-orange-500 text-white hover:bg-orange-400 transition-colors"
             >
-              Get Started Now →
+              Get a Demo →
             </Link>
           </div>
         </div>
