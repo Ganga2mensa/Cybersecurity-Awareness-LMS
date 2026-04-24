@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useState, useRef } from "react"
-import { ShieldCheck, ChevronDown, X } from "lucide-react"
+import { ShieldCheck, ChevronDown, X, UserCircle } from "lucide-react"
 import { ThemeToggle } from "@/components/shared/ThemeToggle"
 
 // ─── Mega menu data ───────────────────────────────────────────────────────────
@@ -175,7 +175,8 @@ export function Navbar() {
           {/* Actions */}
           <div className="hidden md:flex items-center gap-3 shrink-0">
             <ThemeToggle />
-            <Link href="/sign-in" className="text-sm font-medium text-slate-300 hover:text-white transition-colors">
+            <Link href="/sign-in" className="flex items-center gap-1.5 text-sm font-medium text-slate-300 hover:text-white transition-colors">
+              <UserCircle className="size-4" />
               Sign In
             </Link>
             <Link
