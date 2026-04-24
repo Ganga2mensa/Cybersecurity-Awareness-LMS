@@ -153,11 +153,11 @@ describe('Property 8: Profile page renders user name and email for any valid use
           // Generate names that are non-empty after trimming so Testing Library
           // can locate them (it normalizes whitespace when matching text).
           firstName: fc.string({ minLength: 1, maxLength: 30 })
-            .map(s => s.trim())
-            .filter(s => s.length > 0),
+            .map(s => s.trim().replace(/\s+/g, ' '))
+            .filter(s => s.length > 0 && !s.includes('  ')),
           lastName: fc.string({ minLength: 1, maxLength: 30 })
-            .map(s => s.trim())
-            .filter(s => s.length > 0),
+            .map(s => s.trim().replace(/\s+/g, ' '))
+            .filter(s => s.length > 0 && !s.includes('  ')),
           email: fc.emailAddress(),
         }),
         async ({ firstName, lastName, email }) => {

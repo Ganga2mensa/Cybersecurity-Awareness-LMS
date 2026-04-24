@@ -5,9 +5,8 @@ import { Footer } from '@/components/landing/Footer'
 describe('Footer', () => {
   it('renders "SecuraLearn" platform name (Req 8.5)', () => {
     const { container } = render(<Footer />)
-    // Brand is split: "Secura" + "Learn" in nested spans — check the span's full textContent
-    const brand = container.querySelector('span.text-foreground')
-    expect(brand?.textContent).toContain('SecuraLearn')
+    // Brand uses flex layout with ShieldCheck icon + text — check full body text
+    expect(container.textContent).toContain('SecuraLearn')
   })
 
   it('renders copyright text containing "SecuraLearn" (Req 8.5)', () => {
