@@ -180,10 +180,10 @@ export function Navbar() {
               Sign In
             </Link>
             <Link
-              href="/sign-up"
+              href="/contact"
               className="inline-flex items-center justify-center rounded-lg px-4 h-8 text-sm font-semibold bg-orange-500 text-white hover:bg-orange-400 transition-colors"
             >
-              Get Started Free →
+              Get Started Now →
             </Link>
           </div>
         </div>

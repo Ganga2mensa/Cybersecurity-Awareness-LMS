@@ -33,10 +33,10 @@ export function HeroSection() {
 
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
             <Link
-              href="/sign-up"
+              href="/contact"
               className="inline-flex items-center justify-center rounded-lg px-8 h-12 text-base font-semibold bg-orange-500 text-white hover:bg-orange-400 transition-colors shadow-lg shadow-orange-500/25"
             >
-              Get Started Free
+              Get Started Now
             </Link>
             <Link
               href="/get-started"
